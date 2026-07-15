@@ -20,6 +20,7 @@ import hmac
 import json
 import os
 import sqlite3
+import sys
 from collections import OrderedDict
 from pathlib import Path
 
@@ -48,32 +49,43 @@ LIVE_LOG_TAIL = 400
 _MS_PER_DAY = 86_400_000
 
 # ---- 火山方舟（Ark）OpenAPI 用量查询 ----
-# 凭证读取优先级：系统环境变量 > 项目目录下的 .volc.env 文件。
+# 凭证读取优先级：系统环境变量 > exe/脚本同目录 .volc.env > 用户家目录 .volc.env。
 # .volc.env 格式（KEY=VALUE，每行一个）：
 #   VOLC_AK_ID=AKLT...
 #   VOLC_AK_SECRET=WlRJ...
 # 该文件含敏感凭证，请勿提交到版本库或外发。
-_HERE = Path(os.path.dirname(os.path.abspath(__file__)))
+if getattr(sys, "frozen", False):
+    # PyInstaller --onefile: exe 所在目录（用户放 .volc.env 的地方）。
+    _HERE = Path(os.path.dirname(sys.executable))
+else:
+    _HERE = Path(os.path.dirname(os.path.abspath(__file__)))
+# 备用：用户家目录（exe 放在只读位置时仍可配置）。
+_HOME_VOLC_ENV = Path(os.path.expanduser("~")) / ".volc.env"
 _VOLC_ENV_FILE = _HERE / ".volc.env"
 
 
 def _load_volc_env() -> None:
-    """从 .volc.env 加载火山凭证到 os.environ（仅当系统环境变量未设置时）。"""
-    if not _VOLC_ENV_FILE.exists():
-        return
-    try:
-        for line in _VOLC_ENV_FILE.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            k, v = k.strip(), v.strip().strip('"').strip("'")
-            if k and k not in os.environ:
-                os.environ[k] = v
-    except Exception:
-        pass
+    """从 .volc.env 加载火山凭证到 os.environ（仅当系统环境变量未设置时）。
+
+    依次查找：exe/脚本同目录 -> 用户家目录，找到第一个即用。
+    """
+    for path in (_VOLC_ENV_FILE, _HOME_VOLC_ENV):
+        if not path.exists():
+            continue
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+            break  # 读到一个即可
+        except Exception:
+            continue
 
 
 _load_volc_env()

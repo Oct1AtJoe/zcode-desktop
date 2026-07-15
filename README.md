@@ -64,6 +64,22 @@ pyinstaller --onefile --windowed --name zcodeDesktop --icon icon.ico   --collect
 
 生成的 exe 在 `dist/zcodeDesktop.exe`（约 17 MB，依赖 Windows 自带的 WebView2 运行时）。
 
+### exe 用户配置云端凭证
+
+下载 `zcodeDesktop.exe` 后，本地 token 用量开箱即用。如需展示云端套餐额度，在以下任一位置放一个 `.volc.env` 文件即可：
+
+1. **exe 同目录**（推荐）-- 即 `zcodeDesktop.exe` 旁边创建 `.volc.env`；
+2. **用户家目录** -- `C:\Users\你的用户名\.volc.env`（exe 放在只读位置时用这个）。
+
+文件内容（参考 `.volc.env.example`）：
+
+```ini
+VOLC_AK_ID=你的AccessKeyID
+VOLC_AK_SECRET=你的SecretAccessKey
+```
+
+也可不创建文件，直接设置系统环境变量 `VOLC_AK_ID` / `VOLC_AK_SECRET`。
+
 ## 项目结构
 
 ```
