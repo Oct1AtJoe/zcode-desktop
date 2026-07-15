@@ -26,7 +26,7 @@ def _set_windows_taskbar_icon() -> None:
     shows Python's icon and groups the window under Python. Setting a unique
     AppUserModelID before the window is created makes the taskbar treat us as
     a standalone application. We also set the icon on the real HWND once the
-    window is loaded (looked up by title via FindWindowW, since pywebview does
+    window is loaded (looked up by title via FindWindow, since pywebview does
     not expose the hwnd directly).
     """
     if sys.platform != "win32":
@@ -56,12 +56,23 @@ def _set_windows_taskbar_icon() -> None:
                 win32con.IMAGE_ICON, 0, 0,
                 win32con.LR_LOADFROMFILE | win32con.LR_DEFAULTSIZE,
             )
-            hwnd = ctypes.windll.user32.FindWindowW(None, window.title)
+            # Look up the HWND by window title. pywebview does not expose the
+            # hwnd directly, and window.title may not be a plain str, so use
+            # the known title (matches the create_window title below).
+            title = getattr(window, "title", "") or "ZCode 用量监控"
+            if not isinstance(title, str):
+                title = "ZCode 用量监控"
+            hwnd = win32gui.FindWindow(None, title)
             if hwnd:
                 win32api.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_BIG, hicon)
                 win32api.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_SMALL, hicon)
+                # Force a repaint so the taskbar picks up the new icon.
+                win32gui.RedrawWindow(hwnd, None, None,
+                                      win32con.RDW_INVALIDATE | win32con.RDW_UPDATENOW)
         except Exception:
             pass
+
+    _set_windows_taskbar_icon._apply = _apply_hwnd_icon
 
     _set_windows_taskbar_icon._apply = _apply_hwnd_icon
 
