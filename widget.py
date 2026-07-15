@@ -15,7 +15,13 @@ import webview
 
 from data import Api
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+# Resolve the resource directory. When frozen with PyInstaller (--onefile), the
+# bundled files are extracted to sys._MEIPASS at runtime; otherwise they sit
+# next to this script.
+if getattr(sys, "frozen", False):
+    HERE = sys._MEIPASS  # type: ignore[attr-defined]
+else:
+    HERE = os.path.dirname(os.path.abspath(__file__))
 ICON_PATH = os.path.join(HERE, "icon.ico")
 
 # Declare the Shell32 function signatures so ctypes marshals strings correctly.

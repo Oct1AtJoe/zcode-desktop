@@ -30,3 +30,10 @@ desktop.ini
 # ===== ZCode 本地工作区 =====
 # .zcode/ 下的 plans 等为本地会话产物，不应提交
 .zcode/
+
+# ===== PyInstaller 构建产物 =====
+build/
+dist/
+*.spec
+_debug*.log
+_run.log
