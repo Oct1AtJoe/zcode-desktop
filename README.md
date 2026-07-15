@@ -2,7 +2,7 @@
 
 一个轻量的桌面悬浮小组件，用于实时监控 [ZCode](https://zcode.app) 智能体的运行状态与 token 用量。基于 `pywebview` 实现无边框、置顶的桌面悬浮窗，每 2 秒刷新一次本地数据。
 
-![ZCode 用量监控组件预览](docs/widget-preview.jpg)
+![ZCode 用量监控组件预览](docs/widget-preview-v2.jpg)
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![Platform](https://img.shields.io/badge/platform-windows%20%7C%20macos%20%7C%20linux-lightgrey)
