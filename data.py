@@ -125,7 +125,13 @@ def _provider_plan_ids() -> set[str]:
 
 
 def _read_tasks() -> list[dict]:
-    """Read all non-deleted tasks from the SQLite index, newest first."""
+    """Read all non-deleted tasks from the SQLite index, newest first.
+
+    Each workspace_key may have multiple task rows (ZCode writes a fresh
+    task_id when a session is resumed, leaving the prior row as 'completed').
+    To keep the widget list in sync with the actually-running task, collapse
+    each workspace to its most recently updated row.
+    """
     if not DB_PATH.exists():
         return []
     rows = []
@@ -134,14 +140,19 @@ def _read_tasks() -> list[dict]:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
-            """SELECT task_id, title, task_status, provider, model, mode,
+            """SELECT task_id, workspace_key, title, task_status, provider, model, mode,
                       created_at, updated_at, meta_json
                FROM tasks
                WHERE deleted = 0
                ORDER BY updated_at DESC
                LIMIT 40"""
         )
+        seen = set()
         for r in cur.fetchall():
+            wk = r["workspace_key"] or ""
+            if wk in seen:
+                continue
+            seen.add(wk)
             meta = {}
             if r["meta_json"]:
                 try:
