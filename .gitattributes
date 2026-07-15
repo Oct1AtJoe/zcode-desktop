@@ -1,0 +1,5 @@
+# 统一文本文件换行符：仓库内统一用 LF，Windows 检出时按需转换
+* text=auto eol=lf
+
+# Windows 批处理必须用 CRLF
+*.bat text eol=crlf
