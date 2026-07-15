@@ -9,6 +9,7 @@ Run:  python widget.py
 import ctypes
 import os
 import sys
+from ctypes import wintypes
 
 import webview
 
@@ -17,64 +18,68 @@ from data import Api
 HERE = os.path.dirname(os.path.abspath(__file__))
 ICON_PATH = os.path.join(HERE, "icon.ico")
 
+# Declare the Shell32 function signatures so ctypes marshals strings correctly.
+# Without argtypes, LPCWSTR is not marshalled properly and the AppUserModelID
+# ends up as garbled bytes -- which makes the taskbar fall back to grouping the
+# window under pythonw.exe (showing the Python icon instead of ours).
+_shell32 = ctypes.windll.shell32
+_shell32.SetCurrentProcessExplicitAppUserModelID.argtypes = [wintypes.LPCWSTR]
+_shell32.SetCurrentProcessExplicitAppUserModelID.restype = ctypes.c_long  # HRESULT
+
 
 def _set_windows_taskbar_icon() -> None:
     """Pin a custom AppUserModelID + icon so the taskbar groups us under our
     own Z icon instead of the default python/py icon.
 
-    On Windows, `pythonw.exe` hosts the process, so by default the taskbar
-    shows Python's icon and groups the window under Python. Setting a unique
-    AppUserModelID before the window is created makes the taskbar treat us as
-    a standalone application. We also set the icon on the real HWND once the
-    window is loaded (looked up by title via FindWindow, since pywebview does
-    not expose the hwnd directly).
+    Two things must happen:
+
+    1. AppUserModelID — set before the window is created so the taskbar treats
+       us as a standalone application (not pythonw.exe). The ctypes argtypes
+       must be declared, or LPCWSTR is not marshalled and the id ends up
+       garbled.
+
+    2. Form.Icon — pywebview's WinForms backend extracts the icon from
+       `sys.executable` (python.exe) in BrowserForm.__init__ and assigns it to
+       Form.Icon at the .NET level, which overrides any Win32 WM_SETICON we
+       send. So we must overwrite Form.Icon ourselves via `window.native`
+       (the underlying .NET Form exposed by pywebview).
+
+    Timing matters: `webview.start(func=...)` runs func on a background thread
+    *immediately*, before the window is created, so `window.native` is still
+    None at that point. We wait for the `loaded` event first — after that the
+    BrowserForm exists and `window.native` is populated.
+
+    WinForms controls are thread-affined, so the Icon assignment is marshaled
+    onto the UI thread via Form.Invoke(Action).
     """
     if sys.platform != "win32":
         return
     app_id = "Oct1AtJoe.ZCodeUsageWidget"
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+        _shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
     except Exception:
         pass
 
-    def _apply_hwnd_icon(window) -> None:
-        """Set WM_ICON on the real window handle so the taskbar and Alt-Tab
-        thumbnail use icon.ico."""
-        try:
-            import win32gui
-            import win32api
-            import win32con
-        except Exception:
-            # pywin32 is optional; the AppUserModelID alone already fixes the
-            # taskbar grouping in most cases.
-            return
+    def _apply_form_icon(window) -> None:
         try:
             if not os.path.exists(ICON_PATH):
                 return
-            hicon = win32gui.LoadImage(
-                win32api.GetModuleHandle(None), ICON_PATH,
-                win32con.IMAGE_ICON, 0, 0,
-                win32con.LR_LOADFROMFILE | win32con.LR_DEFAULTSIZE,
-            )
-            # Look up the HWND by window title. pywebview does not expose the
-            # hwnd directly, and window.title may not be a plain str, so use
-            # the known title (matches the create_window title below).
-            title = getattr(window, "title", "") or "ZCode 用量监控"
-            if not isinstance(title, str):
-                title = "ZCode 用量监控"
-            hwnd = win32gui.FindWindow(None, title)
-            if hwnd:
-                win32api.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_BIG, hicon)
-                win32api.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_SMALL, hicon)
-                # Force a repaint so the taskbar picks up the new icon.
-                win32gui.RedrawWindow(hwnd, None, None,
-                                      win32con.RDW_INVALIDATE | win32con.RDW_UPDATENOW)
+            import clr  # noqa: F401  (pythonnet, already loaded by pywebview)
+            from System.Drawing import Icon
+            from System import Action
+
+            native = getattr(window, "native", None)
+            if native is None:
+                return
+
+            def _set_icon():
+                native.Icon = Icon(ICON_PATH)
+
+            native.Invoke(Action(_set_icon))
         except Exception:
             pass
 
-    _set_windows_taskbar_icon._apply = _apply_hwnd_icon
-
-    _set_windows_taskbar_icon._apply = _apply_hwnd_icon
+    _set_windows_taskbar_icon._apply = _apply_form_icon
 
 
 _set_windows_taskbar_icon()
@@ -115,7 +120,12 @@ def main() -> None:
     window.expose(api.status, api.quit, api.getPos, api.moveWindow, api.resizeWindow, api.openTask)
 
     def _on_loaded():
-        # Apply the Z icon to the real window handle (taskbar + Alt-Tab).
+        # webview.start(func=...) runs this on a background thread immediately,
+        # before the window is created -- so window.native is still None. We
+        # must wait for the `loaded` event first: after it the BrowserForm
+        # exists and window.native (the .NET Form) is populated.
+        window.events.loaded.wait(15)
+        # Apply the Z icon to the .NET Form (taskbar + Alt-Tab).
         apply = getattr(_set_windows_taskbar_icon, "_apply", None)
         if apply:
             apply(window)
