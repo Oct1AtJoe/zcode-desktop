@@ -1,0 +1,3 @@
+# 桌面组件运行依赖
+pywebview>=5.4
+requests>=2.31

@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZCode 用量组件</title>
+  <style>
+    :root {
+      --bg: #0f1014;
+      --bg2: #16181f;
+      --card: #1a1d27;
+      --card2: #21242f;
+      --border: rgba(255, 255, 255, 0.08);
+      --border2: rgba(255, 255, 255, 0.14);
+      --text: #e8eaf0;
+      --text2: #9aa0ad;
+      --text3: #5f6573;
+      --accent: #7c5cff;
+      --accent2: #4fd1c5;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --red: #f87171;
+      --blue: #60a5fa;
+      --shadow: 0 20px 60px rgba(0, 0, 0, 0.55), 0 2px 0 rgba(255, 255, 255, 0.04) inset;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", -apple-system, system-ui, sans-serif;
+      background: #0f1014;
+      color: var(--text);
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      font-size: 13px;
+    }
+
+    .widget {
+      width: 100%;
+      height: 100%;
+      border-radius: 0;
+      background: linear-gradient(180deg, #1a1d27, #0f1014);
+      border: none;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ---- header / drag handle ---- */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 13px 14px 11px;
+      cursor: grab;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(90deg, rgba(124, 92, 255, 0.10), transparent 55%);
+    }
+
+    .header:active {
+      cursor: grabbing;
+    }
+
+    .logo {
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 14px;
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(124, 92, 255, 0.4);
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+
+    .header .titles {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .header h1 {
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: 0.2px;
+    }
+
+    .header .sub {
+      font-size: 10.5px;
+      color: var(--text3);
+      margin-top: 1px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text3);
+      flex-shrink: 0;
+    }
+
+    .dot.live {
+      background: var(--green);
+      box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
+      animation: pulse 1.8s infinite;
+    }
+
+    @keyframes pulse {
+      0% {
+        box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55);
+      }
+
+      70% {
+        box-shadow: 0 0 0 7px rgba(52, 211, 153, 0);
+      }
+
+      100% {
+        box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+      }
+    }
+
+    .clock {
+      font-size: 11px;
+      color: var(--text2);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .close-btn {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      background: rgba(255, 255, 255, 0.07);
+      color: var(--text2);
+      font-size: 11px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all .15s;
+    }
+
+    .close-btn:hover {
+      background: var(--red);
+      color: #fff;
+    }
+
+    /* collapse button (toggle to icon mode) */
+    .collapse-btn {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      background: rgba(255, 255, 255, 0.07);
+      color: var(--text2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all .15s;
+    }
+
+    .collapse-btn:hover {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    /* ---- collapsed (icon) state ---- */
+    .widget.collapsed .titles,
+    .widget.collapsed .clock,
+    .widget.collapsed .collapse-btn,
+    .widget.collapsed .close-btn {
+      display: none;
+    }
+
+    .widget.collapsed .header {
+      justify-content: center;
+      align-items: center;
+      padding: 0;
+      flex: 1;
+      border-bottom: none;
+    }
+
+    .widget.collapsed .logo {
+      width: 48px;
+      height: 48px;
+      font-size: 22px;
+      border-radius: 0;
+      cursor: pointer;
+      box-shadow: none;
+      transition: transform .15s;
+    }
+
+    .widget.collapsed .logo:hover {
+      transform: scale(1.06);
+    }
+
+    .widget.collapsed .section {
+      display: none;
+    }
+
+    /* ---- usage section ---- */
+    .section {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section:last-child {
+      border-bottom: none;
+      padding-bottom: 16px;
+    }
+
+    .sec-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 11px;
+    }
+
+    .sec-title {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    .sec-badge {
+      font-size: 11px;
+      color: var(--accent2);
+      background: rgba(79, 209, 197, 0.10);
+      padding: 2px 8px;
+      border-radius: 20px;
+      border: 1px solid rgba(79, 209, 197, 0.18);
+    }
+
+    .usage-total {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      margin-bottom: 3px;
+    }
+
+    .usage-total .num {
+      font-size: 27px;
+      font-weight: 720;
+      letter-spacing: -0.5px;
+      font-variant-numeric: tabular-nums;
+      background: linear-gradient(135deg, #fff, var(--accent2));
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .usage-total .unit {
+      font-size: 11px;
+      color: var(--text3);
+    }
+
+    .usage-total .delta {
+      font-size: 11px;
+      color: var(--green);
+      margin-left: auto;
+    }
+
+    .usage-label {
+      font-size: 11.5px;
+      color: var(--text3);
+      margin-bottom: 12px;
+    }
+
+    .usage-label b {
+      color: var(--text2);
+      font-weight: 600;
+    }
+
+    .usage-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px;
+      margin-bottom: 11px;
+    }
+
+    .stat {
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 9px;
+    }
+
+    .stat .k {
+      font-size: 11px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stat .v {
+      font-size: 15px;
+      font-weight: 650;
+      margin-top: 2px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stat .v small {
+      font-size: 11px;
+      color: var(--text3);
+      font-weight: 500;
+      margin-left: 2px;
+    }
+
+    .stat.in .v {
+      color: var(--blue);
+    }
+
+    .stat.out .v {
+      color: var(--accent2);
+    }
+
+    /* cloud plan quota (火山方舟 AgentPlan) */
+    .plan-list {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .plan-bucket {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .plan-bucket-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      font-size: 12px;
+    }
+
+    .plan-bucket-head .pb-name {
+      color: var(--text2);
+      font-weight: 600;
+    }
+
+    .plan-bucket-head .pb-val {
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+    }
+
+    .plan-bucket-head .pb-val b {
+      font-weight: 700;
+    }
+
+    .plan-bucket-head .pb-val small {
+      color: var(--text3);
+      font-size: 11px;
+      margin-left: 3px;
+    }
+
+    .plan-bar {
+      height: 5px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      overflow: hidden;
+    }
+
+    .plan-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width .6s ease;
+    }
+
+    .plan-bar-fill.ok {
+      background: linear-gradient(90deg, var(--accent2), var(--green));
+    }
+
+    .plan-bar-fill.warn {
+      background: linear-gradient(90deg, var(--amber), #fb923c);
+    }
+
+    .plan-bar-fill.crit {
+      background: linear-gradient(90deg, var(--red), #fb7185);
+    }
+
+    .plan-bucket-foot {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text3);
+    }
+
+    .plan-note {
+      font-size: 11px;
+      color: var(--text3);
+      margin-top: 6px;
+    }
+
+    /* ---- current task ---- */
+    .task-card {
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 9px 10px;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+
+    .task-card:hover {
+      border-color: var(--accent);
+      background: rgba(124, 92, 255, 0.06);
+    }
+
+    .section.tasks-section {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .task-list {
+      flex: 1 1 auto;
+      max-height: none;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      margin: 0 2px;
+      padding-right: 4px;
+    }
+
+    .task-list::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .task-list::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .task-list::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 2px;
+    }
+
+    .task-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 5px;
+    }
+
+    .status-pill {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 20px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+
+    .status-pill::before {
+      content: "";
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+    }
+
+    .status-pill.running {
+      background: rgba(52, 211, 153, 0.14);
+      color: var(--green);
+    }
+
+    .status-pill.running::before {
+      background: var(--green);
+      animation: blink 1.1s infinite;
+    }
+
+    .status-pill.completed {
+      background: rgba(96, 165, 250, 0.12);
+      color: var(--blue);
+    }
+
+    .status-pill.completed::before {
+      background: var(--blue);
+    }
+
+    .status-pill.idle,
+    .status-pill.queued {
+      background: rgba(251, 191, 36, 0.12);
+      color: var(--amber);
+    }
+
+    .status-pill.idle::before,
+    .status-pill.queued::before {
+      background: var(--amber);
+    }
+
+    .status-pill.error,
+    .status-pill.failed {
+      background: rgba(248, 113, 113, 0.12);
+      color: var(--red);
+    }
+
+    .status-pill.error::before,
+    .status-pill.failed::before {
+      background: var(--red);
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: 0.3
+      }
+    }
+
+    .mode-tag {
+      font-size: 11px;
+      color: var(--text2);
+      background: rgba(255, 255, 255, 0.05);
+      padding: 2px 6px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+    }
+
+    .task-title {
+      font-size: 12.5px;
+      font-weight: 620;
+      line-height: 1.3;
+      word-break: break-word;
+    }
+
+    .task-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 9px;
+      margin-top: 5px;
+      font-size: 11px;
+      color: var(--text3);
+    }
+
+    .task-meta .m {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .task-meta svg {
+      width: 11px;
+      height: 11px;
+      opacity: 0.8;
+    }
+
+    /* live tool */
+    .live-tool {
+      margin-top: 10px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(124, 92, 255, 0.08);
+      border: 1px solid rgba(124, 92, 255, 0.18);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+    }
+
+    .live-tool.idle {
+      background: rgba(255, 255, 255, 0.03);
+      border-color: var(--border);
+    }
+
+    .spinner {
+      width: 13px;
+      height: 13px;
+      border: 2px solid rgba(124, 92, 255, 0.25);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+
+    .live-tool.idle .spinner {
+      animation: none;
+      border-color: var(--border);
+      border-top-color: var(--text3);
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .live-tool .lt-name {
+      font-weight: 650;
+      color: var(--accent);
+    }
+
+    .live-tool.idle .lt-name {
+      color: var(--text3);
+    }
+
+    .live-tool .lt-time {
+      margin-left: auto;
+      color: var(--text3);
+      font-variant-numeric: tabular-nums;
+      font-size: 11px;
+    }
+
+    /* activity feed */
+    .feed {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .feed-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11px;
+      color: var(--text2);
+      padding: 2px 0;
+    }
+
+    .feed-item .ico {
+      width: 14px;
+      text-align: center;
+      flex-shrink: 0;
+      font-size: 11px;
+    }
+
+    .feed-item .txt {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .feed-item .t {
+      color: var(--text3);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
+    }
+
+    .feed-item.model .ico {
+      color: var(--blue);
+    }
+
+    .feed-item.tool_start .ico {
+      color: var(--amber);
+    }
+
+    .feed-item.tool_end .ico {
+      color: var(--green);
+    }
+
+    .feed-item.turn_start .ico,
+    .feed-item.turn_end .ico {
+      color: var(--accent);
+    }
+
+    .empty {
+      color: var(--text3);
+      font-size: 11px;
+      text-align: center;
+      padding: 8px 0;
+    }
+
+    /* loading */
+    .loading {
+      padding: 40px 0;
+      text-align: center;
+      color: var(--text3);
+      font-size: 12px;
+    }
+
+    .loading .spinner {
+      display: inline-block;
+      margin-bottom: 8px;
+    }
+
+    .flash {
+      animation: flash .5s ease;
+    }
+
+    @keyframes flash {
+      0% {
+        background-color: rgba(124, 92, 255, 0.15);
+      }
+
+      100% {}
+    }
+  </style>
+</head>
+
+<body>
+  <div class="widget" id="widget">
+    <!-- header (drag handle) -->
+    <div class="header" id="dragHandle">
+      <div class="logo">Z</div>
+      <div class="titles">
+        <h1>ZCode 用量监控</h1>
+        <div class="sub"><span class="dot" id="liveDot"></span><span id="connStatus">初始化中…</span></div>
+      </div>
+      <div class="clock" id="clock">--:--</div>
+      <button class="collapse-btn" id="collapseBtn" title="折叠">
+        <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="5 9 8 6 11 9" />
+        </svg>
+      </button>
+      <button class="close-btn" id="closeBtn" title="关闭">×</button>
+    </div>
+
+    <!-- model usage -->
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">模型用量</div>
+        <div class="sec-badge" id="reqBadge">0 次请求</div>
+      </div>
+      <div class="usage-total">
+        <span class="num" id="totalTokens">0</span>
+        <span class="unit">tokens 今日累计</span>
+        <span class="delta" id="todayDelta"></span>
+      </div>
+      <div class="usage-label">今日 <b id="todayTokens">0</b> · 近7日 <b id="weekTokens">0</b> · 累计 <b id="allTokens">0</b>
+      </div>
+
+      <div class="usage-grid">
+        <div class="stat in">
+          <div class="k">今日输入 Input</div>
+          <div class="v" id="inTokens">0</div>
+        </div>
+        <div class="stat out">
+          <div class="k">今日输出 Output</div>
+          <div class="v" id="outTokens">0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- cloud plan quota (火山方舟 AgentPlan) -->
+    <div class="section" id="planSection" style="display:none">
+      <div class="sec-head">
+        <div class="sec-title">云端套餐额度</div>
+        <div class="sec-badge" id="planBadge">--</div>
+      </div>
+      <div class="plan-list" id="planList"></div>
+      <div class="plan-note" id="planNote"></div>
+    </div>
+
+    <!-- current task + live activity -->
+    <div class="section tasks-section">
+      <div class="sec-head">
+        <div class="sec-title">任务列表</div>
+        <div class="sec-badge" id="modelBadge" style="display:none"></div>
+      </div>
+      <div id="taskArea" class="task-list">
+        <div class="loading" id="initStatus">
+          <div class="spinner"></div><br><span id="initMsg">正在连接 ZCode…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let api = null;
+    let prevTotal = 0;
+    let refreshTimer = null;
+    let started = false;
+
+    const fmt = (n) => {
+      if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+      if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+      return String(n);
+    };
+    const fmtFull = (n) => n.toLocaleString('en-US');
+
+    const TOOL_ICONS = {
+      tool_start: '⚡', tool_end: '✓', model: '🧠', turn_start: '▶', turn_end: '■'
+    };
+    const TOOL_LABELS = {
+      Bash: '执行命令', Read: '读取文件', Write: '写入文件', Edit: '编辑文件',
+      Glob: '搜索文件', Grep: '搜索内容', TodoWrite: '更新计划', Agent: '启动子代理',
+      Task: '启动子代理', WebFetch: '网络请求', WebSearch: '网络搜索',
+      AskUserQuestion: '询问用户', EnterPlanMode: '进入计划', ExitPlanMode: '确认计划',
+      Skill: '调用技能', ReadSessionContext: '读取会话', SendMessage: '发送消息',
+      TaskStop: '停止任务'
+    };
+
+    function startPolling() {
+      if (started) return;
+      started = true;
+      refresh();
+      refreshTimer = setInterval(refresh, 1500);
+    }
+
+    async function refresh() {
+      if (!api) return;
+      try {
+        const s = await api.status();
+        renderUsage(s.usage);
+        renderPlanUsage(s.planUsage);
+        renderTasks(s.recentTasks);
+        renderClock(s.now);
+        document.getElementById('liveDot').className = 'dot live';
+        document.getElementById('connStatus').textContent = '实时连接';
+      } catch (e) {
+        document.getElementById('liveDot').className = 'dot';
+        document.getElementById('connStatus').textContent = '重连中…';
+        console.error('refresh error:', e);
+      }
+    }
+
+    function setInit(msg) {
+      const el = document.getElementById('initMsg');
+      if (el) el.textContent = msg;
+    }
+
+    function renderUsage(u) {
+      // Today is the headline. The widget previously showed only the most recent
+      // request's usage (read from pruned rollout files); now it reads the
+      // persistent `model_usage` table, so "today" is the true cumulative total
+      // across all tasks for the current day.
+      const today = u.today || {};
+      const total = today.totalTokens || 0;
+      const el = document.getElementById('totalTokens');
+      el.textContent = fmt(total);
+      if (total !== prevTotal && prevTotal > 0) {
+        el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+      }
+      prevTotal = total;
+
+      document.getElementById('inTokens').innerHTML = fmt(today.inputTokens || 0) + ' <small>tk</small>';
+      document.getElementById('outTokens').innerHTML = fmt(today.outputTokens || 0) + ' <small>tk</small>';
+      document.getElementById('todayTokens').textContent = fmt(today.totalTokens || 0);
+      document.getElementById('weekTokens').textContent = fmt((u.week || {}).totalTokens || 0);
+      document.getElementById('allTokens').textContent = fmt((u.total || {}).totalTokens || 0);
+      const todayReq = today.requests || 0;
+      const allReq = (u.total || {}).requests || 0;
+      document.getElementById('reqBadge').textContent = todayReq + ' 次请求 / 累计 ' + allReq;
+    }
+
+    function renderPlanUsage(p) {
+      const section = document.getElementById('planSection');
+      if (!section) return;
+      // 未启用或调用失败 -> 隐藏整块，不影响本地 token 展示
+      if (!p || !p.enabled) { section.style.display = 'none'; return; }
+      section.style.display = '';
+
+      // 套餐类型 badge
+      const badge = document.getElementById('planBadge');
+      badge.textContent = p.planType ? ('套餐: ' + p.planType) : '已连接';
+
+      // 4 个额度窗口的进度条
+      const list = document.getElementById('planList');
+      const buckets = p.buckets || [];
+      list.innerHTML = buckets.map(b => {
+        const pct = Math.min(100, b.usedPct || 0);
+        const cls = pct >= 90 ? 'crit' : (pct >= 70 ? 'warn' : 'ok');
+        return `<div class="plan-bucket">
+      <div class="plan-bucket-head">
+        <span class="pb-name">${b.label}</span>
+        <span class="pb-val"><b>${fmt(b.used)}</b><small> / ${fmt(b.quota)}</small></span>
+      </div>
+      <div class="plan-bar"><div class="plan-bar-fill ${cls}" style="width:${pct}%"></div></div>
+      <div class="plan-bucket-foot"><span>剩余 ${fmt(b.remaining)} (${b.remainingPct}%)</span><span>${fmtResetCountdown(b.key, b.resetMs)}</span></div>
+    </div>`;
+      }).join('');
+
+      const note = document.getElementById('planNote');
+      note.textContent = p.error ? ('⚠ ' + p.error) : ('更新于 ' + (p.updatedAt || '').slice(11, 19) + ' · 数据来源: 火山方舟 OpenAPI');
+    }
+
+    // 重置倒计时：5小时窗口显示"X小时Y分钟后"，周/月显示"X天X小时后"，0 值部分省略。
+    function fmtResetCountdown(key, resetMs) {
+      if (!resetMs) return '';
+      const diff = resetMs - Date.now();
+      if (diff <= 0) return '已重置';
+      const totalMin = Math.floor(diff / 60000);
+      const days = Math.floor(totalMin / (60 * 24));
+      const hours = Math.floor((totalMin % (60 * 24)) / 60);
+      const mins = totalMin % 60;
+      let parts = [];
+      if (key === 'AFPFiveHour') {
+        // 5小时窗口：只显示小时+分钟
+        if (hours > 0) parts.push(hours + '小时');
+        if (mins > 0) parts.push(mins + '分钟');
+      } else {
+        // 周/月：天+小时
+        if (days > 0) parts.push(days + '天');
+        if (hours > 0) parts.push(hours + '小时');
+      }
+      if (!parts.length) return '即将重置';
+      return parts.join('') + '后重置';
+    }
+
+    function renderTasks(tasks) {
+      const area = document.getElementById('taskArea');
+      if (!tasks || !tasks.length) { area.innerHTML = '<div class="empty">最近1小时暂无执行任务</div>'; return; }
+      // 只显示最近1小时的任务
+      const oneHourAgo = Date.now() - 3600000;
+      const recent = tasks.filter(t => (t.updatedAt || 0) >= oneHourAgo);
+      if (!recent.length) { area.innerHTML = '<div class="empty">最近1小时暂无执行任务</div>'; return; }
+      area.innerHTML = recent.map((t, idx) => {
+        const status = t.status || 'idle';
+        const statusText = { running: '运行中', completed: '已完成', idle: '空闲', queued: '排队中', error: '错误', failed: '失败' }[status] || status;
+        const model = (t.model || '').split('/').pop();
+        const ws = (t.workspacePath || '').split(/[\\/]/).pop() || t.workspacePath || '';
+        const fullWs = t.workspacePath || '';
+        const ago = relativeTime(t.updatedAt);
+        return `
+    <div class="task-card" data-idx="${idx}" style="margin-bottom:7px">
+      <div class="task-top">
+        <span class="status-pill ${status}">${statusText}</span>
+        ${t.mode ? `<span class="mode-tag">${t.mode}</span>` : ''}
+        ${t.thoughtLevel ? `<span class="mode-tag">思考:${t.thoughtLevel}</span>` : ''}
+        <span class="m" style="margin-left:auto;font-size:9.5px;color:var(--text3)">${ago}</span>
+      </div>
+      <div class="task-title">${escapeHtml(t.title)}</div>
+      <div class="task-meta">
+        ${ws ? `<span class="m">📁 ${escapeHtml(ws)}</span>` : ''}
+        ${model ? `<span class="m">🤖 ${escapeHtml(model)}</span>` : ''}
+      </div>
+    </div>`;
+      }).join('');
+      // bind click handlers
+      area.querySelectorAll('.task-card').forEach((card, idx) => {
+        const t = recent[idx];
+        card.addEventListener('click', () => {
+          if (window.pywebview && window.pywebview.api && t.workspacePath) {
+            window.pywebview.api.openTask(t.workspacePath);
+          }
+        });
+      });
+      // show model badge from first task
+      const first = recent[0];
+      if (first && first.model) {
+        const mb = document.getElementById('modelBadge');
+        mb.textContent = (first.model || '').split('/').pop(); mb.style.display = '';
+      }
+    }
+
+    function renderClock(now) { document.getElementById('clock').textContent = (now || '').slice(0, 8); }
+
+    /* ---- helpers ---- */
+    function escapeHtml(s) { return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+    function relativeTime(ms) {
+      if (!ms) return '-';
+      const d = Date.now() - ms; const s = Math.floor(d / 1000);
+      if (s < 5) return '刚刚';
+      if (s < 60) return s + '秒前';
+      if (s < 3600) return Math.floor(s / 60) + '分钟前';
+      if (s < 86400) return Math.floor(s / 3600) + '小时前';
+      return Math.floor(s / 86400) + '天前';
+    }
+    function elapsedSince(iso, nowIso) {
+      const a = new Date(iso).getTime(); const b = nowIso ? new Date(nowIso).getTime() : Date.now();
+      const s = Math.max(0, Math.floor((b - a) / 1000));
+      if (s < 60) return s + 's';
+      return Math.floor(s / 60) + 'm' + (s % 60) + 's';
+    }
+    function tsHHMMSS(iso) { try { return new Date(iso).toISOString().slice(11, 19); } catch { return ''; } }
+
+    /* ---- events ---- */
+    document.getElementById('closeBtn').addEventListener('click', () => { if (api && api.quit) api.quit(); });
+
+    /* ---- collapse / expand toggle ---- */
+    // Resizes the pywebview window between full size and a small Z icon.
+    // On Windows, win.resize() keeps the top-left corner fixed, so the
+    // widget just grows/shrinks in place — no position restore needed.
+    let _collapsed = false;
+    let _fullW = 322, _fullH = 850;   // full window size, synced from the live window
+    const _ICON_W = 48, _ICON_H = 48; // collapsed icon size
+
+    async function setCollapsed(collapsed) {
+      _collapsed = collapsed;
+      const hasApi = window.pywebview && window.pywebview.api;
+      const apiObj = hasApi ? window.pywebview.api : null;
+
+      // Before collapsing, remember the real full size so we can restore it.
+      if (collapsed && apiObj && apiObj.getPos) {
+        try {
+          const p = await apiObj.getPos();
+          if (p && typeof p.w === 'number' && typeof p.h === 'number') { _fullW = p.w; _fullH = p.h; }
+        } catch (e) { /* bridge not ready; fall back to defaults */ }
+      }
+
+      document.getElementById('widget').classList.toggle('collapsed', collapsed);
+
+      // Resize the native window to match (resize keeps the corner fixed on Win).
+      if (apiObj && apiObj.resizeWindow) {
+        try {
+          await apiObj.resizeWindow(collapsed ? _ICON_W : _fullW, collapsed ? _ICON_H : _fullH);
+        } catch (e) { console.error('resizeWindow failed:', e); /* non-fatal: UI still toggles */ }
+      }
+    }
+
+    document.getElementById('collapseBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      setCollapsed(true);
+    });
+    // Expand is handled by the injected drag handler's mouseup (it distinguishes
+    // a click from a drag via a movement threshold), so a click on the collapsed
+    // Z icon expands while a drag moves the window.
+    window.__toggleExpand = setCollapsed;
+
+    // clock tick independent of data refresh
+    setInterval(() => { document.getElementById('clock').textContent = new Date().toTimeString().slice(0, 8); }, 1000);
+
+    // Robust pywebview bootstrap. The bridge may become ready before or after this
+    // script runs, so we listen for the event AND poll for a short window.
+    function bindApi() {
+      if (window.pywebview && window.pywebview.api) {
+        api = window.pywebview.api;
+        setInit('已连接，读取数据…');
+        startPolling();
+        return true;
+      }
+      return false;
+    }
+
+    window.addEventListener('pywebviewready', () => {
+      setInit('pywebview 已就绪');
+      bindApi();
+    });
+
+    // Fallback polling in case the event already fired before our listener attached
+    (function waitForApi(retries) {
+      if (bindApi()) return;
+      setInit('等待 pywebview 桥接… (' + (20 - retries) + '/20)');
+      if (retries > 0) setTimeout(() => waitForApi(retries - 1), 300);
+      else setInit('连接失败：pywebview 桥接未就绪');
+    })(20);  // try for ~6s
+  </script>
+</body>
+
+</html>

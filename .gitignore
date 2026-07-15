@@ -1,0 +1,32 @@
+# ===== 敏感凭证（禁止提交） =====
+# 火山方舟 OpenAPI 凭证，含真实密钥
+.volc.env
+
+# ===== 测试输出 =====
+probe*.txt
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+.python-version
+
+# ===== IDE / 编辑器 =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== ZCode 本地工作区 =====
+# .zcode/ 下的 plans 等为本地会话产物，不应提交
+.zcode/
