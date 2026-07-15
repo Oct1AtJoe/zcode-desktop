@@ -338,7 +338,7 @@
       color: var(--accent2);
     }
 
-    /* cloud plan quota (火山方舟 AgentPlan) */
+    /* cloud plan quota (火山方舟 CodingPlan) */
     .plan-list {
       display: flex;
       flex-direction: column;
@@ -770,7 +770,7 @@
       </div>
     </div>
 
-    <!-- cloud plan quota (火山方舟 AgentPlan) -->
+    <!-- cloud plan quota (火山方舟 CodingPlan) -->
     <div class="section" id="planSection" style="display:none">
       <div class="sec-head">
         <div class="sec-title">云端套餐额度</div>
@@ -880,23 +880,34 @@
       if (!p || !p.enabled) { section.style.display = 'none'; return; }
       section.style.display = '';
 
-      // 套餐类型 badge
+      // 套餐档位 badge：优先用用户配置的 tier，否则显示套餐类型名。
+      // 注意接口的 rawStatus(Running 等)是运行状态、非档位，不在这里展示。
       const badge = document.getElementById('planBadge');
-      badge.textContent = p.planType ? ('套餐: ' + p.planType) : '已连接';
+      const isCoding = (p.planType || 'coding') === 'coding';
+      const planName = isCoding ? '编程套餐' : 'AgentPlan';
+      badge.textContent = p.tier ? (planName + '·' + p.tier) : planName;
 
-      // 4 个额度窗口的进度条
+      // 各窗口用量进度条
+      // - coding: 只有百分比 -> "X% 已用 / 剩余 Y%"
+      // - agent : 绝对额度   -> "used / quota" + "剩余 Z%"
       const list = document.getElementById('planList');
       const buckets = p.buckets || [];
       list.innerHTML = buckets.map(b => {
         const pct = Math.min(100, b.usedPct || 0);
         const cls = pct >= 90 ? 'crit' : (pct >= 70 ? 'warn' : 'ok');
+        const head = isCoding
+          ? `<span class="pb-val"><b>${(b.usedPct || 0).toFixed(1)}%</b><small> 已用</small></span>`
+          : `<span class="pb-val"><b>${fmt(b.used)}</b><small> / ${fmt(b.quota)}</small></span>`;
+        const foot = isCoding
+          ? `剩余 ${(b.remainingPct || 0).toFixed(1)}%`
+          : `剩余 ${fmt(b.remaining)} (${(b.remainingPct || 0).toFixed(1)}%)`;
         return `<div class="plan-bucket">
       <div class="plan-bucket-head">
         <span class="pb-name">${b.label}</span>
-        <span class="pb-val"><b>${fmt(b.used)}</b><small> / ${fmt(b.quota)}</small></span>
+        ${head}
       </div>
       <div class="plan-bar"><div class="plan-bar-fill ${cls}" style="width:${pct}%"></div></div>
-      <div class="plan-bucket-foot"><span>剩余 ${fmt(b.remaining)} (${b.remainingPct}%)</span><span>${fmtResetCountdown(b.key, b.resetMs)}</span></div>
+      <div class="plan-bucket-foot"><span>${foot}</span><span>${fmtResetCountdown(b.key, b.resetMs)}</span></div>
     </div>`;
       }).join('');
 
@@ -904,7 +915,7 @@
       note.textContent = p.error ? ('⚠ ' + p.error) : ('更新于 ' + (p.updatedAt || '').slice(11, 19) + ' · 数据来源: 火山方舟 OpenAPI');
     }
 
-    // 重置倒计时：5小时窗口显示"X小时Y分钟后"，周/月显示"X天X小时后"，0 值部分省略。
+    // 重置倒计时：短窗口(会话/5小时)显示"X小时Y分钟后"，周/月显示"X天X小时后"。
     function fmtResetCountdown(key, resetMs) {
       if (!resetMs) return '';
       const diff = resetMs - Date.now();
@@ -914,8 +925,8 @@
       const hours = Math.floor((totalMin % (60 * 24)) / 60);
       const mins = totalMin % 60;
       let parts = [];
-      if (key === 'AFPFiveHour') {
-        // 5小时窗口：只显示小时+分钟
+      // coding 的 session 与 agent 的 AFPFiveHour 都是短窗口
+      if (key === 'session' || key === 'AFPFiveHour') {
         if (hours > 0) parts.push(hours + '小时');
         if (mins > 0) parts.push(mins + '分钟');
       } else {

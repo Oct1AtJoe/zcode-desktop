@@ -35,5 +35,7 @@ desktop.ini
 build/
 dist/
 *.spec
+# 打包出的可执行文件（通过 GitHub Release 发布，不入库）
+*.exe
 _debug*.log
 _run.log

@@ -38,9 +38,9 @@ MODEL_USAGE_DB = CLI_DIR / "db" / "db.sqlite"
 ROLLOUT_DIR = CLI_DIR / "rollout"
 LOG_DIR = CLI_DIR / "log"
 
-# The AgentPlan provider id (火山 AgentPlan) is read from config.json so we can
-# detect which provider is "the plan" even if it changes. We also accept any
-# provider whose baseURL points at a */plan/* endpoint as a coding plan.
+# Coding plan providers (火山 CodingPlan / AgentPlan) are detected from
+# config.json so we can tell which provider is "the plan" even if it changes.
+# We accept any provider whose baseURL points at a */plan/* endpoint as a plan.
 CONFIG_PATH = V2_DIR / "config.json"
 
 # How many recent log lines to tail for live activity.
@@ -98,6 +98,16 @@ VOLC_REGION = "cn-beijing"
 VOLC_VERSION = "2024-01-01"
 # 云端用量刷新较慢且为远程调用，缓存一段时间避免 1.5s 轮询打爆 API。
 VOLC_CACHE_TTL = 60.0
+# 套餐类型：coding（编程套餐，调 GetCodingPlanUsage）或 agent（AgentPlan，
+# 调 GetAFPUsage）。在 .volc.env 里用 VOLC_PLAN_TYPE=coding|agent 选择，未配置
+# 时默认 coding（当前在售套餐）。
+VOLC_PLAN_TYPE = (os.environ.get("VOLC_PLAN_TYPE", "") or "coding").strip().lower()
+if VOLC_PLAN_TYPE not in ("coding", "agent"):
+    VOLC_PLAN_TYPE = "coding"
+# 套餐档位标签（可选）：火山接口不返回档位（Pro/标准版/Max…），由用户在
+# .volc.env 里填 VOLC_PLAN_TIER 自行标注，前端 badge 显示成"编程套餐·Pro"。
+# 留空则只显示套餐类型名。
+VOLC_PLAN_TIER = (os.environ.get("VOLC_PLAN_TIER", "") or "").strip()
 
 
 def _load_config() -> dict:
@@ -108,7 +118,7 @@ def _load_config() -> dict:
 
 
 def _provider_plan_ids() -> set[str]:
-    """Return the set of provider ids that are coding plans (AgentPlan / zai plan).
+    """Return the set of provider ids that are coding plans (CodingPlan / AgentPlan).
 
     A provider is considered a plan if its baseURL contains '/plan/' (the
     volcengine ark plan endpoint and the zcode-plan endpoint both do) OR its
@@ -401,40 +411,43 @@ def _volc_call(action: str, body: dict) -> dict | None:
 _VOLC_CACHE: list = [0.0, None]
 
 
-def _read_plan_usage() -> dict:
-    """读取火山方舟 AgentPlan 套餐的云端额度 + 用量明细。
+def _parse_coding_plan(cp: dict) -> dict:
+    """解析 GetCodingPlanUsage 的 Result。
 
-    与本地 model_usage（token 计数）完全独立，二者并存展示。云端数据刷新较
-    慢，缓存 VOLC_CACHE_TTL 秒；未配置凭证 / 调用失败时返回空结构（前端据此
-    隐藏云端区块），不影响本地 token 展示。
+    CodingPlan 不返回绝对 Quota/Used，只返回各窗口已用百分比（Percent，单位为
+    百分点 0-100，非 0-1 比例）与重置时间；桶为 session / weekly / monthly。
     """
-    now_ts = datetime.datetime.now().timestamp()
-    cached_ts, cached = _VOLC_CACHE
-    if cached is not None and (now_ts - cached_ts) < VOLC_CACHE_TTL:
-        return cached
-
-    empty = {
-        "enabled": bool(VOLC_AK_ID and VOLC_AK_SECRET),
-        "planType": "",
-        "buckets": [],
-        "error": "",
-        "updatedAt": datetime.datetime.now().isoformat(timespec="seconds"),
+    buckets: list[dict] = []
+    label_map = {"session": "会话", "weekly": "每周", "monthly": "每月"}
+    for item in cp.get("QuotaUsage", []) or []:
+        level = item.get("Level", "") or ""
+        if level not in label_map:
+            continue
+        used_pct = round(float(item.get("Percent", 0.0) or 0.0), 1)
+        remaining_pct = round(max(0.0, 100.0 - used_pct), 1)
+        reset_ts = item.get("ResetTimestamp") or 0
+        buckets.append({
+            "key": level,
+            "label": label_map[level],
+            "quota": 100,
+            "used": used_pct,
+            "remaining": remaining_pct,
+            "remainingPct": remaining_pct,
+            "usedPct": used_pct,
+            "resetMs": (reset_ts * 1000) if reset_ts else 0,
+        })
+    return {
+        "rawStatus": cp.get("Status", "") or "",
+        "buckets": buckets,
     }
 
-    if not empty["enabled"]:
-        _VOLC_CACHE[0] = now_ts
-        _VOLC_CACHE[1] = empty
-        return empty
 
-    # 1) 套餐 AFP 额度（5小时/日/周/月 的额度、已用、重置时间）
-    afp = _volc_call("GetAFPUsage", {})
+def _parse_agent_plan(afp: dict) -> dict:
+    """解析 GetAFPUsage 的 Result（旧 AgentPlan 套餐）。
+
+    返回绝对 Quota/Used/ResetTime；桶为 AFPFiveHour / AFPWeekly / AFPMonthly。
+    """
     buckets: list[dict] = []
-    plan_type = ""
-    if afp is None:
-        empty["error"] = "调用失败"
-        _VOLC_CACHE[0] = now_ts
-        _VOLC_CACHE[1] = empty
-        return empty
     plan_type = afp.get("PlanType", "") or ""
     label_map = {
         "AFPFiveHour": "5小时",
@@ -457,12 +470,64 @@ def _read_plan_usage() -> dict:
             "usedPct": round(used / quota * 100, 1) if quota else 0.0,
             "resetMs": b.get("ResetTime") or 0,
         })
+    # agent 套餐没有独立的运行状态字段，PlanType 即档位标识（如 AFPMonthly）。
+    return {
+        "rawStatus": "",
+        "buckets": buckets,
+    }
+
+
+def _read_plan_usage() -> dict:
+    """读取火山方舟套餐的云端用量。
+
+    按 VOLC_PLAN_TYPE 选择套餐类型：coding -> GetCodingPlanUsage（编程套餐，
+    仅百分比），agent -> GetAFPUsage（旧 AgentPlan，绝对额度）。两种解析结果
+    归一化成相同结构（status / buckets[quota|used|remaining|remainingPct|
+    usedPct|resetMs]），前端按统一逻辑渲染。
+
+    与本地 model_usage（token 计数）完全独立，二者并存展示。云端数据刷新较慢，
+    缓存 VOLC_CACHE_TTL 秒；未配置凭证 / 调用失败时返回空结构（前端据此隐藏
+    云端区块），不影响本地 token 展示。
+    """
+    now_ts = datetime.datetime.now().timestamp()
+    cached_ts, cached = _VOLC_CACHE
+    if cached is not None and (now_ts - cached_ts) < VOLC_CACHE_TTL:
+        return cached
+
+    empty = {
+        "enabled": bool(VOLC_AK_ID and VOLC_AK_SECRET),
+        "planType": VOLC_PLAN_TYPE,
+        "tier": VOLC_PLAN_TIER,
+        "rawStatus": "",
+        "buckets": [],
+        "error": "",
+        "updatedAt": datetime.datetime.now().isoformat(timespec="seconds"),
+    }
+
+    if not empty["enabled"]:
+        _VOLC_CACHE[0] = now_ts
+        _VOLC_CACHE[1] = empty
+        return empty
+
+    action = "GetCodingPlanUsage" if VOLC_PLAN_TYPE == "coding" else "GetAFPUsage"
+    resp = _volc_call(action, {})
+    if resp is None:
+        empty["error"] = "调用失败"
+        _VOLC_CACHE[0] = now_ts
+        _VOLC_CACHE[1] = empty
+        return empty
+
+    parsed = (_parse_coding_plan if VOLC_PLAN_TYPE == "coding" else _parse_agent_plan)(resp)
+    raw_status = parsed["rawStatus"]
 
     result = {
         "enabled": True,
-        "planType": plan_type,
-        "buckets": buckets,
-        "error": "",
+        "planType": VOLC_PLAN_TYPE,
+        "tier": VOLC_PLAN_TIER,
+        "rawStatus": raw_status,
+        "buckets": parsed["buckets"],
+        # coding 套餐 Status 不是 Running 时（如已到期/暂停），提示用户。
+        "error": ("套餐未生效（%s）" % raw_status) if (VOLC_PLAN_TYPE == "coding" and raw_status and raw_status != "Running") else "",
         "updatedAt": datetime.datetime.now().isoformat(timespec="seconds"),
     }
     _VOLC_CACHE[0] = now_ts

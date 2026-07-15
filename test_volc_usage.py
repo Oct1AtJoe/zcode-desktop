@@ -5,7 +5,7 @@
   VOLC_AK_ID      Access Key ID
   VOLC_AK_SECRET  Secret Access Key
 
-只做只读查询：GetAFPUsage / GetUsageDetails / GetInferenceUsage / ListSeatAFPUsage。
+只做只读查询：GetCodingPlanUsage / GetUsageDetails / GetInferenceUsage / ListSeatAFPUsage。
 """
 import hashlib
 import hmac
@@ -136,8 +136,8 @@ if __name__ == "__main__":
     today = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
 
-    # 1) 套餐 AFP 额度（无需参数，直接返回额度/已用/重置时间）
-    call("GetAFPUsage", {}, label="GetAFPUsage 套餐AFP额度")
+    # 1) CodingPlan（编程套餐）用量：各窗口已用百分比 + 重置时间
+    call("GetCodingPlanUsage", {}, label="GetCodingPlanUsage 编程套餐用量")
 
     # 2) 套餐用量详情（按模型 token 维度）
     #    QueryInterval 必须是 "Day" 或 "Hour"；StartTime/EndTime 格式 YYYY-MM-DD
