@@ -109,6 +109,20 @@ if VOLC_PLAN_TYPE not in ("coding", "agent"):
 # 留空则只显示套餐类型名。
 VOLC_PLAN_TIER = (os.environ.get("VOLC_PLAN_TIER", "") or "").strip()
 
+# 套餐开通时间（可选，用于 weekly/monthly 窗口倒推本地 token 明细）。
+# 去火山方舟控制台 -> CodingPlan 订阅页查「开通时间/生效时间」，精确到分钟。
+# 格式：2026-07-15T23:19:00 或 2026-07-15 23:19:00。未配置时 session 正常
+# 统计；weekly/monthly 不聚合本地 token，前端提示用户去配置。
+_VOLC_PLAN_START_RAW = (os.environ.get("VOLC_PLAN_START", "") or "").strip()
+VOLC_PLAN_START: datetime.datetime | None = None
+for _fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M"):
+    try:
+        VOLC_PLAN_START = datetime.datetime.strptime(_VOLC_PLAN_START_RAW, _fmt)
+        break
+    except ValueError:
+        continue
+del _VOLC_PLAN_START_RAW
+
 
 def _load_config() -> dict:
     try:
@@ -450,11 +464,63 @@ def _volc_call(action: str, body: dict) -> dict | None:
 _VOLC_CACHE: list = [0.0, None]
 
 
+def _plan_window_models(start_ms: int) -> list[dict]:
+    """按套餐窗口起点聚合本地 model_usage 表的分模型 token 明细。
+
+    在 [start_ms, now] 区间内，按 model_id 分组求和 computed_total_tokens，
+    返回按 token 降序的明细列表。窗口倒推自云端 ResetTimestamp（session 减 5h、
+    weekly 减 7d、monthly 月份减 1），与云端 Percent 互补——Percent 反映额度水位，
+    本地明细反映「这个窗口各模型烧了多少 token」。异常/无库时返回空列表。
+    """
+    if not MODEL_USAGE_DB.exists() or not start_ms:
+        return []
+    try:
+        conn = sqlite3.connect(f"file:{MODEL_USAGE_DB}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        now_ms = int(datetime.datetime.now().timestamp() * 1000)
+        cur.execute(
+            """SELECT LOWER(model_id) AS mid,
+                      COUNT(*) AS reqs,
+                      COALESCE(SUM(computed_total_tokens), 0) AS tt
+               FROM model_usage
+               WHERE status = 'completed' AND completed_at >= ? AND completed_at <= ?
+               GROUP BY mid
+               ORDER BY tt DESC""",
+            (start_ms, now_ms),
+        )
+        rows = cur.fetchall()
+    except Exception:
+        return []
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    total = sum(r["tt"] for r in rows) or 0
+    return [
+        {
+            "model": r["mid"],
+            "tokens": r["tt"],
+            "requests": r["reqs"],
+            "pct": round(r["tt"] / total * 100, 1) if total else 0.0,
+        }
+        for r in rows
+    ]
+
+
 def _parse_coding_plan(cp: dict) -> dict:
     """解析 GetCodingPlanUsage 的 Result。
 
     CodingPlan 不返回绝对 Quota/Used，只返回各窗口已用百分比（Percent，单位为
     百分点 0-100，非 0-1 比例）与重置时间；桶为 session / weekly / monthly。
+
+    同时根据 ResetTimestamp 倒推各窗口的本地 token 聚合起点：
+      - session : reset - 5h（不依赖开通日）
+      - weekly  : max(reset - 7d, VOLC_PLAN_START)
+      - monthly : max(reset 月份-1, VOLC_PLAN_START)
+    weekly/monthly 在 VOLC_PLAN_START 未配置时标记 needsConfig，由 _read_plan_usage
+    跳过聚合、前端提示用户去 .volc.env 配置。
     """
     buckets: list[dict] = []
     label_map = {"session": "会话", "weekly": "每周", "monthly": "每月"}
@@ -465,6 +531,35 @@ def _parse_coding_plan(cp: dict) -> dict:
         used_pct = round(float(item.get("Percent", 0.0) or 0.0), 1)
         remaining_pct = round(max(0.0, 100.0 - used_pct), 1)
         reset_ts = item.get("ResetTimestamp") or 0
+        reset_ms = (reset_ts * 1000) if reset_ts else 0
+
+        # 倒推本地 token 聚合的窗口起点（毫秒）。
+        window_start_ms = 0
+        needs_config = False
+        if reset_ms:
+            reset_dt = datetime.datetime.fromtimestamp(reset_ts)
+            if level == "session":
+                window_start_ms = int((reset_dt - datetime.timedelta(hours=5)).timestamp() * 1000)
+            elif level == "weekly":
+                if VOLC_PLAN_START is None:
+                    needs_config = True
+                else:
+                    start = reset_dt - datetime.timedelta(days=7)
+                    if start < VOLC_PLAN_START:
+                        start = VOLC_PLAN_START
+                    window_start_ms = int(start.timestamp() * 1000)
+            elif level == "monthly":
+                if VOLC_PLAN_START is None:
+                    needs_config = True
+                else:
+                    # 月份减 1（年进位），归零到当天 00:00 再取 max(开通时刻)。
+                    m = reset_dt.month - 1 or 12
+                    y = reset_dt.year - (reset_dt.month == 1)
+                    start = datetime.datetime(y, m, reset_dt.day, 0, 0, 0)
+                    if start < VOLC_PLAN_START:
+                        start = VOLC_PLAN_START
+                    window_start_ms = int(start.timestamp() * 1000)
+
         buckets.append({
             "key": level,
             "label": label_map[level],
@@ -473,7 +568,10 @@ def _parse_coding_plan(cp: dict) -> dict:
             "remaining": remaining_pct,
             "remainingPct": remaining_pct,
             "usedPct": used_pct,
-            "resetMs": (reset_ts * 1000) if reset_ts else 0,
+            "resetMs": reset_ms,
+            "windowStart": window_start_ms,
+            "needsConfig": needs_config,
+            "models": [],
         })
     return {
         "rawStatus": cp.get("Status", "") or "",
@@ -558,6 +656,15 @@ def _read_plan_usage() -> dict:
 
     parsed = (_parse_coding_plan if VOLC_PLAN_TYPE == "coding" else _parse_agent_plan)(resp)
     raw_status = parsed["rawStatus"]
+
+    # coding 套餐：对每个已倒推出 windowStart 且不需要配置的 bucket，聚合本地
+    # model_usage 的分模型 token 明细。needsConfig=True 的 bucket（未配置
+    # VOLC_PLAN_START）跳过，models 保持空列表，由前端提示用户去配置。
+    if VOLC_PLAN_TYPE == "coding":
+        for b in parsed["buckets"]:
+            if b.get("needsConfig") or not b.get("windowStart"):
+                continue
+            b["models"] = _plan_window_models(b["windowStart"])
 
     result = {
         "enabled": True,

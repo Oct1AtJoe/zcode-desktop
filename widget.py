@@ -106,7 +106,7 @@ def main() -> None:
         title="ZCode 用量监控",
         url=html_path,
         width=322,
-        height=835,
+        height=840,
         x=1860,
         y=80,
         resizable=False,

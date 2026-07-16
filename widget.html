@@ -363,6 +363,12 @@
       font-weight: 600;
     }
 
+    .plan-bucket-head .pb-left {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+
     .plan-bucket-head .pb-val {
       font-variant-numeric: tabular-nums;
       color: var(--text);
@@ -408,6 +414,74 @@
       justify-content: space-between;
       font-size: 11px;
       color: var(--text3);
+    }
+
+    /* 分模型 token 明细：悬浮浮层，挂在「X%已用」后面，不占组件高度 */
+    .pm-trigger {
+      position: relative;
+      cursor: help;
+      display: inline-flex;
+      align-items: baseline;
+    }
+
+    .pm-trigger .pm-icon {
+      font-size: 13px;
+      color: var(--text3);
+      margin-left: 4px;
+    }
+
+    .pm-trigger .pm-total {
+      font-size: 12px;
+      color: var(--text2);
+      font-variant-numeric: tabular-nums;
+      margin-left: 6px;
+    }
+
+    .pm-pop {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      z-index: 50;
+      min-width: 240px;
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: var(--card2);
+      border: 1px solid var(--border);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .pm-trigger:hover .pm-pop,
+    .pm-trigger:focus-within .pm-pop {
+      display: flex;
+    }
+
+    .pm-pop .pm-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 16px;
+      font-size: 12px;
+      color: var(--text3);
+      white-space: nowrap;
+    }
+
+    .pm-pop .pm-row .pm-name {
+      color: var(--text2);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 180px;
+    }
+
+    .pm-pop .pm-hint {
+      font-size: 12px;
+      color: var(--amber);
+      line-height: 1.4;
+      white-space: normal;
     }
 
     .plan-note {
@@ -904,15 +978,28 @@
       list.innerHTML = buckets.map(b => {
         const pct = Math.min(100, b.usedPct || 0);
         const cls = pct >= 90 ? 'crit' : (pct >= 70 ? 'warn' : 'ok');
+        // 分模型 token 明细：悬浮浮层挂在「X%已用」后面，不占组件高度。
+        // needsConfig=true（未配 VOLC_PLAN_START）-> 浮层提示去配置；否则列各模型。
+        // 图标前显示本窗口各模型 token 总计。
+        let popHtml = '';
+        if (isCoding) {
+          if (b.needsConfig) {
+            popHtml = `<span class="pm-trigger"><span class="pm-total">--</span><span class="pm-icon">⚙</span><span class="pm-pop"><span class="pm-hint">⚠ 需在 .volc.env 配置 VOLC_PLAN_START（套餐开通时间）才能统计本窗口 token 明细</span></span></span>`;
+          } else if (b.models && b.models.length) {
+            const totalTk = b.models.reduce((s, m) => s + (m.tokens || 0), 0);
+            popHtml = `<span class="pm-trigger"><span class="pm-total">${fmt(totalTk)} tk</span><span class="pm-icon">▦</span><span class="pm-pop">` +
+              b.models.map(m => `<div class="pm-row"><span class="pm-name">${m.model}</span><span>${fmt(m.tokens)} tk · ${m.pct}%</span></div>`).join('') +
+              `</span></span>`;
+          }
+        }
         const head = isCoding
-          ? `<span class="pb-val"><b>${(b.usedPct || 0).toFixed(1)}%</b><small> 已用</small></span>`
-          : `<span class="pb-val"><b>${fmt(b.used)}</b><small> / ${fmt(b.quota)}</small></span>`;
+          ? `<span class="pb-left"><span class="pb-name">${b.label}</span>${popHtml}</span><span class="pb-val"><b>${(b.usedPct || 0).toFixed(1)}%</b><small> 已用</small></span>`
+          : `<span class="pb-left"><span class="pb-name">${b.label}</span></span><span class="pb-val"><b>${fmt(b.used)}</b><small> / ${fmt(b.quota)}</small></span>`;
         const foot = isCoding
           ? `剩余 ${(b.remainingPct || 0).toFixed(1)}%`
           : `剩余 ${fmt(b.remaining)} (${(b.remainingPct || 0).toFixed(1)}%)`;
         return `<div class="plan-bucket">
       <div class="plan-bucket-head">
-        <span class="pb-name">${b.label}</span>
         ${head}
       </div>
       <div class="plan-bar"><div class="plan-bar-fill ${cls}" style="width:${pct}%"></div></div>
