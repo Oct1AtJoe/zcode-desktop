@@ -560,7 +560,6 @@
 
     .task-meta {
       display: flex;
-      flex-wrap: wrap;
       gap: 4px 9px;
       margin-top: 5px;
       font-size: 11px;
@@ -571,12 +570,22 @@
       display: flex;
       align-items: center;
       gap: 3px;
+      min-width: 0;          /* allow flex children to shrink */
+      /* remove fixed ratio, let them grow/shrink naturally */
+    }
+
+    .task-meta .m-text {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      min-width: 0;
     }
 
     .task-meta svg {
       width: 11px;
       height: 11px;
       opacity: 0.8;
+      flex-shrink: 0;
     }
 
     /* live tool */
@@ -962,9 +971,9 @@
       </div>
       <div class="task-title" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</div>
       <div class="task-meta">
-        ${ws ? `<span class="m">📁 ${escapeHtml(ws)}</span>` : ''}
-        ${model ? `<span class="m">🤖 ${escapeHtml(model)}</span>` : ''}
-        ${(t.tokens && t.tokens.total > 0) ? `<span class="m">🔥 ${fmt(t.tokens.total)}</span>` : ''}
+        ${ws ? `<span class="m" style="flex:1 1 auto" title="${escapeHtml(fullWs)}">📁 <span class="m-text">${escapeHtml(ws)}</span></span>` : ''}
+        ${model ? `<span class="m" style="flex:1 1 auto" title="${escapeHtml(model)}">🤖 <span class="m-text">${escapeHtml(model)}</span></span>` : ''}
+        ${(t.tokens && t.tokens.total > 0) ? `<span class="m" style="flex:0 0 auto;justify-content:flex-end" title="累计 ${fmtFull(t.tokens.total)} tokens（入 ${fmtFull(t.tokens.input)} / 出 ${fmtFull(t.tokens.output)}）">🔥 <span class="m-text">${fmt(t.tokens.total)}</span></span>` : ''}
       </div>
     </div>`;
       }).join('');
