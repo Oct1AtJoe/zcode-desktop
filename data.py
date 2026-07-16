@@ -178,6 +178,45 @@ def _read_tasks() -> list[dict]:
     return rows
 
 
+def _read_task_tokens(task_ids: list[str]) -> dict:
+    """Aggregate token usage per task from `model_usage`.
+
+    `tasks.task_id` is the same value as `model_usage.session_id`, so we can
+    group token totals back onto each task in a single query.
+    Returns { task_id: {total, input, output, requests} }.
+    """
+    if not task_ids or not MODEL_USAGE_DB.exists():
+        return {}
+    out: dict = {}
+    try:
+        conn = sqlite3.connect(f"file:{MODEL_USAGE_DB}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        placeholders = ",".join("?" for _ in task_ids)
+        cur.execute(
+            f"""SELECT session_id,
+                       COALESCE(SUM(computed_total_tokens),0) AS total,
+                       COALESCE(SUM(input_tokens),0)        AS input,
+                       COALESCE(SUM(output_tokens),0)       AS output,
+                       COUNT(*)                              AS requests
+                FROM model_usage
+                WHERE status = 'completed' AND session_id IN ({placeholders})
+                GROUP BY session_id""",
+            task_ids,
+        )
+        for r in cur.fetchall():
+            out[r["session_id"]] = {
+                "total": r["total"],
+                "input": r["input"],
+                "output": r["output"],
+                "requests": r["requests"],
+            }
+        conn.close()
+    except Exception:
+        return {}
+    return out
+
+
 def _fmt_ts(ms: int | None) -> str:
     if not ms:
         return ""
@@ -638,6 +677,11 @@ class Api:
 
     def status(self):
         tasks = _read_tasks()
+        # attach per-task token usage (tasks.task_id == model_usage.session_id)
+        task_tokens = _read_task_tokens([t["taskId"] for t in tasks])
+        _zero = {"total": 0, "input": 0, "output": 0, "requests": 0}
+        for t in tasks:
+            t["tokens"] = task_tokens.get(t["taskId"], _zero)
         # the "current task" is the most recently updated running task; if none
         # running, fall back to the newest task overall.
         current = None

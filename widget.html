@@ -940,11 +940,11 @@
 
     function renderTasks(tasks) {
       const area = document.getElementById('taskArea');
-      if (!tasks || !tasks.length) { area.innerHTML = '<div class="empty">最近1小时暂无执行任务</div>'; return; }
-      // 只显示最近1小时的任务
-      const oneHourAgo = Date.now() - 3600000;
-      const recent = tasks.filter(t => (t.updatedAt || 0) >= oneHourAgo);
-      if (!recent.length) { area.innerHTML = '<div class="empty">最近1小时暂无执行任务</div>'; return; }
+      if (!tasks || !tasks.length) { area.innerHTML = '<div class="empty">今天暂无任务</div>'; return; }
+      // 只显示今天创建的任务
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const recent = tasks.filter(t => (t.createdAt || 0) >= todayStart.getTime());
+      if (!recent.length) { area.innerHTML = '<div class="empty">今天暂无任务</div>'; return; }
       area.innerHTML = recent.map((t, idx) => {
         const status = t.status || 'idle';
         const statusText = { running: '运行中', completed: '已完成', idle: '空闲', queued: '排队中', error: '错误', failed: '失败' }[status] || status;
@@ -964,6 +964,7 @@
       <div class="task-meta">
         ${ws ? `<span class="m">📁 ${escapeHtml(ws)}</span>` : ''}
         ${model ? `<span class="m">🤖 ${escapeHtml(model)}</span>` : ''}
+        ${(t.tokens && t.tokens.total > 0) ? `<span class="m">🔥 ${fmt(t.tokens.total)}</span>` : ''}
       </div>
     </div>`;
       }).join('');
