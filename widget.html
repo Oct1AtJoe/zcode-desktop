@@ -346,6 +346,7 @@
     }
 
     .plan-bucket {
+      position: relative;  /* 作为 .pm-pop 的定位上下文，让悬浮窗对齐组件左右边框 */
       display: flex;
       flex-direction: column;
       gap: 3px;
@@ -418,7 +419,6 @@
 
     /* 分模型 token 明细：悬浮浮层，挂在「X%已用」后面，不占组件高度 */
     .pm-trigger {
-      position: relative;
       cursor: help;
       display: inline-flex;
       align-items: baseline;
@@ -441,8 +441,8 @@
       position: absolute;
       top: calc(100% + 6px);
       left: 0;
+      right: 0;  /* 对齐组件左右边框，完全占满宽度 */
       z-index: 50;
-      min-width: 240px;
       display: none;
       flex-direction: column;
       gap: 4px;
@@ -474,7 +474,7 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      max-width: 180px;
+      /* 去掉宽度限制，让模型名完整显示 */
     }
 
     .pm-pop .pm-hint {
