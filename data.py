@@ -196,14 +196,18 @@ def _read_tasks() -> list[dict]:
         return []
 
     # ZCode lags at flipping task_status back to 'running' when a new message
-    # is sent in an already-completed task. Override with the real-time turn
-    # signal from the log: any task whose session currently has an open turn is
-    # running right now, regardless of the stale DB value.
+    # is sent in an already-completed task, and never updates `mode` when the
+    # user switches modes mid-session (it records the creation-time mode).
+    # Override both with real-time signals from the log: any task whose session
+    # currently has an open turn is running, and each session's last
+    # `session.mode.updated` is its current mode.
     active = _active_session_ids()
-    if active:
-        for t in rows:
-            if t["taskId"] in active:
-                t["status"] = "running"
+    modes = _session_modes()
+    for t in rows:
+        if t["taskId"] in active:
+            t["status"] = "running"
+        if t["taskId"] in modes:
+            t["mode"] = modes[t["taskId"]]
     return rows
 
 
@@ -803,6 +807,26 @@ def _read_live_activity() -> dict:
     }
 
 
+def _read_recent_log_lines() -> list[str]:
+    """Read all lines of the newest zcode log file.
+
+    Both `_active_session_ids` (turn status) and `_session_modes` (current
+    mode) need to scan the log; sharing one read halves the I/O on each poll.
+    The single-day file is ~10k lines / ~60ms to parse, and turn/mode events
+    are rare (~2-3%), so a whole-file scan (not a fixed tail) is both cheap
+    and necessary -- a long turn with many tool calls can push its
+    `turn.started` past any fixed tail window.
+    """
+    files = sorted(glob.glob(str(LOG_DIR / "zcode-*.jsonl")))
+    if not files:
+        return []
+    try:
+        with open(files[-1], encoding="utf-8") as f:
+            return f.readlines()
+    except Exception:
+        return []
+
+
 def _active_session_ids() -> set[str]:
     """Return top-level sessionIds that currently have an open (running) turn.
 
@@ -817,20 +841,9 @@ def _active_session_ids() -> set[str]:
     Only top-level sessions are considered; subagent sessions
     (`sess_subagent_*`) are ignored since they are not user tasks. A freshness
     cutoff discards turns left open by a crash/kill long ago.
-
-    The whole newest log file is scanned (not just a tail): turn events are
-    rare (~2-3% of lines) and a long turn with many tool calls can push its
-    `turn.started` past a fixed tail window, so a tail would miss running
-    tasks. Parsing the single-day file is cheap (~60ms).
     """
-    files = sorted(glob.glob(str(LOG_DIR / "zcode-*.jsonl")))
-    if not files:
-        return set()
-    fp = files[-1]
-    try:
-        with open(fp, encoding="utf-8") as f:
-            lines = f.readlines()
-    except Exception:
+    lines = _read_recent_log_lines()
+    if not lines:
         return set()
 
     # last turn state per top-level sessionId: True=open, False=closed
@@ -872,6 +885,38 @@ def _active_session_ids() -> set[str]:
         if now_ms - ts_ms <= ACTIVE_TURN_FRESH_MS:
             active.add(sess)
     return active
+
+
+def _session_modes() -> dict[str, str]:
+    """Return each top-level session's most recent mode from the log.
+
+    Mirrors the status fix: `tasks.mode` in the DB is the mode the task was
+    *created* with and is not updated when the user switches modes mid-session
+    (e.g. yolo -> plan -> edit). The log emits `session.mode.updated` with the
+    session's `sessionId` (== `tasks.task_id`) and `context.mode`, so the last
+    such event per session is its current mode. Returns {sessionId: mode};
+    sessions with no mode-update event keep whatever the DB recorded.
+    """
+    lines = _read_recent_log_lines()
+    if not lines:
+        return {}
+    last_mode: dict[str, str] = {}
+    for line in lines:
+        if "session.mode.updated" not in line:
+            continue
+        try:
+            obj = json.loads(line.strip())
+        except Exception:
+            continue
+        if obj.get("event") != "session.mode.updated":
+            continue
+        sess = obj.get("sessionId", "")
+        if not sess.startswith("sess_") or "subagent" in sess:
+            continue
+        mode = (obj.get("context") or {}).get("mode", "")
+        if mode:
+            last_mode[sess] = mode
+    return last_mode
 
 
 class Api:
