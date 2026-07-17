@@ -256,6 +256,7 @@
     }
 
     .usage-total {
+      position: relative;  /* 作为今日累计悬浮窗的定位上下文 */
       display: flex;
       align-items: baseline;
       gap: 7px;
@@ -282,6 +283,14 @@
       font-size: 11px;
       color: var(--green);
       margin-left: auto;
+    }
+
+    /* 今日累计分模型悬浮窗：复用 .pm-trigger/.pm-pop 的显示逻辑，
+       但定位相对 .usage-total，左右占满组件宽度 */
+    .um-trigger .pm-pop {
+      left: 0;
+      right: 0;
+      width: auto;
     }
 
     .usage-label {
@@ -837,6 +846,10 @@
         <span class="num" id="totalTokens">0</span>
         <span class="unit">tokens 今日累计</span>
         <span class="delta" id="todayDelta"></span>
+        <span class="pm-trigger um-trigger" id="todayModelsTrigger" style="display:none">
+          <span class="pm-icon">▦</span>
+          <span class="pm-pop" id="todayModelsPop"></span>
+        </span>
       </div>
       <div class="usage-label">今日 <b id="todayTokens">0</b> · 近7日 <b id="weekTokens">0</b> · 累计 <b id="allTokens">0</b>
       </div>
@@ -954,6 +967,21 @@
       const todayReq = today.requests || 0;
       const allReq = (u.total || {}).requests || 0;
       document.getElementById('reqBadge').textContent = todayReq + ' 次请求 / 累计 ' + allReq;
+
+      // 今日累计分模型悬浮窗（不区分 provider，显示今天所有模型用量）
+      const trigger = document.getElementById('todayModelsTrigger');
+      const pop = document.getElementById('todayModelsPop');
+      const models = u.models || [];
+      if (models.length) {
+        const totalTk = models.reduce((s, m) => s + (m.totalTokens || 0), 0) || 0;
+        pop.innerHTML = models.map(m => {
+          const pct = totalTk ? (m.totalTokens / totalTk * 100).toFixed(1) : '0.0';
+          return `<div class="pm-row"><span class="pm-name">${escapeHtml(m.model)}</span><span>${fmt(m.totalTokens || 0)} tk · ${pct}%</span></div>`;
+        }).join('');
+        trigger.style.display = '';
+      } else {
+        trigger.style.display = 'none';
+      }
     }
 
     function renderPlanUsage(p) {
