@@ -469,25 +469,34 @@ def _plan_window_models(start_ms: int) -> list[dict]:
 
     在 [start_ms, now] 区间内，按 model_id 分组求和 computed_total_tokens，
     返回按 token 降序的明细列表。窗口倒推自云端 ResetTimestamp（session 减 5h、
-    weekly 减 7d、monthly 月份减 1），与云端 Percent 互补——Percent 反映额度水位，
+    weekly 减 7d、monthly 月份减 1），与云端 Percent 互补--Percent 反映额度水位，
     本地明细反映「这个窗口各模型烧了多少 token」。异常/无库时返回空列表。
+
+    只统计套餐 provider（_provider_plan_ids）的用量，避免把非 plan 模型
+    （如 mimo / gpt / deepseek 等自带 key 的 provider）计入套餐窗口明细。
     """
     if not MODEL_USAGE_DB.exists() or not start_ms:
+        return []
+    plan_pids = _provider_plan_ids()
+    if not plan_pids:
         return []
     try:
         conn = sqlite3.connect(f"file:{MODEL_USAGE_DB}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         now_ms = int(datetime.datetime.now().timestamp() * 1000)
+        placeholders = ",".join("?" for _ in plan_pids)
         cur.execute(
-            """SELECT LOWER(model_id) AS mid,
-                      COUNT(*) AS reqs,
-                      COALESCE(SUM(computed_total_tokens), 0) AS tt
-               FROM model_usage
-               WHERE status = 'completed' AND completed_at >= ? AND completed_at <= ?
-               GROUP BY mid
-               ORDER BY tt DESC""",
-            (start_ms, now_ms),
+            f"""SELECT LOWER(model_id) AS mid,
+                       COUNT(*) AS reqs,
+                       COALESCE(SUM(computed_total_tokens), 0) AS tt
+                FROM model_usage
+                WHERE status = 'completed'
+                  AND completed_at >= ? AND completed_at <= ?
+                  AND provider_id IN ({placeholders})
+                GROUP BY mid
+                ORDER BY tt DESC""",
+            (start_ms, now_ms, *plan_pids),
         )
         rows = cur.fetchall()
     except Exception:
