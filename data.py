@@ -203,11 +203,14 @@ def _read_tasks() -> list[dict]:
     # `session.mode.updated` is its current mode.
     active = _active_session_ids()
     modes = _session_modes()
+    levels = _session_thought_levels()
     for t in rows:
         if t["taskId"] in active:
             t["status"] = "running"
         if t["taskId"] in modes:
             t["mode"] = modes[t["taskId"]]
+        if t["taskId"] in levels:
+            t["thoughtLevel"] = levels[t["taskId"]]
     return rows
 
 
@@ -917,6 +920,38 @@ def _session_modes() -> dict[str, str]:
         if mode:
             last_mode[sess] = mode
     return last_mode
+
+
+def _session_thought_levels() -> dict[str, str]:
+    """Return each top-level session's most recent thoughtLevel from the log.
+
+    Same situation as mode: `tasks.meta_json.thoughtLevel` records the level
+    set at task creation and is not updated when the user changes the reasoning
+    effort mid-session. The log emits `session.reasoning_effort.updated` with
+    `sessionId` (== `tasks.task_id`) and `context.thoughtLevel`, so the last
+    such event per session is its current level. Returns {sessionId: level};
+    sessions with no such event keep the DB value.
+    """
+    lines = _read_recent_log_lines()
+    if not lines:
+        return {}
+    last_level: dict[str, str] = {}
+    for line in lines:
+        if "session.reasoning_effort.updated" not in line:
+            continue
+        try:
+            obj = json.loads(line.strip())
+        except Exception:
+            continue
+        if obj.get("event") != "session.reasoning_effort.updated":
+            continue
+        sess = obj.get("sessionId", "")
+        if not sess.startswith("sess_") or "subagent" in sess:
+            continue
+        level = (obj.get("context") or {}).get("thoughtLevel", "")
+        if level:
+            last_level[sess] = level
+    return last_level
 
 
 class Api:
