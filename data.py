@@ -46,6 +46,11 @@ CONFIG_PATH = V2_DIR / "config.json"
 # How many recent log lines to tail for live activity.
 LIVE_LOG_TAIL = 400
 
+# A turn.started with no matching turn.completed means the task is actively
+# running. But a turn can be left "open" forever if ZCode crashed or was force
+# killed mid-turn, so only trust turns newer than this cutoff.
+ACTIVE_TURN_FRESH_MS = 30 * 60 * 1000  # 30 minutes
+
 _MS_PER_DAY = 86_400_000
 
 # ---- 火山方舟（Ark）OpenAPI 用量查询 ----
@@ -189,6 +194,16 @@ def _read_tasks() -> list[dict]:
         conn.close()
     except Exception:
         return []
+
+    # ZCode lags at flipping task_status back to 'running' when a new message
+    # is sent in an already-completed task. Override with the real-time turn
+    # signal from the log: any task whose session currently has an open turn is
+    # running right now, regardless of the stale DB value.
+    active = _active_session_ids()
+    if active:
+        for t in rows:
+            if t["taskId"] in active:
+                t["status"] = "running"
     return rows
 
 
@@ -786,6 +801,77 @@ def _read_live_activity() -> dict:
         "turnActive": turn_active,
         "logFile": os.path.basename(fp),
     }
+
+
+def _active_session_ids() -> set[str]:
+    """Return top-level sessionIds that currently have an open (running) turn.
+
+    ZCode's tasks-index DB updates `task_status` back to 'running' with a lag
+    when a new message is sent in an already-completed task -- the widget keeps
+    showing 'completed' until ZCode rewrites the row (often only on task
+    switch). The zcode log, by contrast, emits `turn.started` immediately when a
+    turn begins and `turn.completed` when it ends, and its `sessionId` is the
+    same value as `tasks.task_id`. So a top-level session whose last turn event
+    is `turn.started` (with no later `turn.completed`) is running *right now*.
+
+    Only top-level sessions are considered; subagent sessions
+    (`sess_subagent_*`) are ignored since they are not user tasks. A freshness
+    cutoff discards turns left open by a crash/kill long ago.
+
+    The whole newest log file is scanned (not just a tail): turn events are
+    rare (~2-3% of lines) and a long turn with many tool calls can push its
+    `turn.started` past a fixed tail window, so a tail would miss running
+    tasks. Parsing the single-day file is cheap (~60ms).
+    """
+    files = sorted(glob.glob(str(LOG_DIR / "zcode-*.jsonl")))
+    if not files:
+        return set()
+    fp = files[-1]
+    try:
+        with open(fp, encoding="utf-8") as f:
+            lines = f.readlines()
+    except Exception:
+        return set()
+
+    # last turn state per top-level sessionId: True=open, False=closed
+    last_turn_open: dict[str, bool] = {}
+    last_turn_ts: dict[str, str] = {}
+    now_ms = datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000
+    for line in lines:
+        # cheap pre-filter: skip lines that can't be turn events without a
+        # full json parse (turn events are ~2% of lines).
+        if '"turn.' not in line:
+            continue
+        try:
+            obj = json.loads(line.strip())
+        except Exception:
+            continue
+        ev = obj.get("event", "")
+        if ev not in ("turn.started", "turn.completed"):
+            continue
+        sess = obj.get("sessionId", "")
+        # only top-level user sessions (not subagents)
+        if not sess.startswith("sess_") or "subagent" in sess:
+            continue
+        last_turn_open[sess] = ev == "turn.started"
+        last_turn_ts[sess] = obj.get("timestamp", "")
+
+    active: set[str] = set()
+    for sess, is_open in last_turn_open.items():
+        if not is_open:
+            continue
+        ts = last_turn_ts.get(sess, "")
+        try:
+            ts_ms = datetime.datetime.fromisoformat(
+                ts.replace("Z", "+00:00")
+            ).timestamp() * 1000
+        except Exception:
+            # unparseable timestamp -> trust it (safer to show running)
+            active.add(sess)
+            continue
+        if now_ms - ts_ms <= ACTIVE_TURN_FRESH_MS:
+            active.add(sess)
+    return active
 
 
 class Api:
