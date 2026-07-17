@@ -31,6 +31,9 @@ desktop.ini
 # .zcode/ 下的 plans 等为本地会话产物，不应提交
 .zcode/
 
+# AGENTS.md：AI 助手的项目记忆与协作约定，属本地工作配置，不入库
+AGENTS.md
+
 # ===== PyInstaller 构建产物 =====
 build/
 dist/
