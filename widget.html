@@ -895,6 +895,19 @@
     let prevTotal = 0;
     let refreshTimer = null;
     let started = false;
+    // 防堆积：上一次 status() 未返回时跳过本次轮询。pywebview 5.4 的 JS 桥每次
+    // 调用都新建 Python 线程并行执行（util.py:js_bridge_call），前端 setInterval
+    // 1.5s 不等上次返回就会堆积大量并发线程，长时间空闲后火山调用阻塞会让线程
+    // 雪崩，UI 长时间无响应。串行锁确保任一时刻只有一个 status() 在飞。
+    let refreshInFlight = false;
+    // 容错计数：单次超时/失败不立即显示"重连中"，连续 FAIL_THRESHOLD 次才切。
+    // 避免网络抖动造成状态频繁闪烁。成功一次即清零。
+    let failCount = 0;
+    const FAIL_THRESHOLD = 3;
+    // 单次 status() 超时上限。pywebview JS 桥本身无超时机制（_checkValue 是 1ms
+    // setInterval 永久轮询），必须前端用 Promise.race 自保，避免火山调用卡死时
+    // Promise 永久 pending、refresh 永远停在这一帧。
+    const STATUS_TIMEOUT_MS = 5000;
 
     const fmt = (n) => {
       if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
@@ -925,18 +938,38 @@
 
     async function refresh() {
       if (!api) return;
+      // 串行锁：上一次还没返回就跳过，防止 setInterval 堆积并发 status() 调用。
+      if (refreshInFlight) return;
+      refreshInFlight = true;
       try {
-        const s = await api.status();
+        // 用 Promise.race 给 status() 加超时。pywebview 的 JS 桥没有原生超时，
+        // 火山调用卡住时 api.status() 返回的 Promise 会永久 pending，必须前端
+        // 自己抢超时才能让 refresh 落到 catch 分支、释放锁、继续下一轮。
+        const s = await Promise.race([
+          api.status(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('status timeout')), STATUS_TIMEOUT_MS)
+          ),
+        ]);
         renderUsage(s.usage);
         renderPlanUsage(s.planUsage);
         renderTasks(s.recentTasks);
         renderClock(s.now);
+        failCount = 0;
         document.getElementById('liveDot').className = 'dot live';
         document.getElementById('connStatus').textContent = '实时连接';
       } catch (e) {
-        document.getElementById('liveDot').className = 'dot';
-        document.getElementById('connStatus').textContent = '重连中…';
+        failCount++;
+        // 连续 FAIL_THRESHOLD 次失败才显示"重连中"，单次抖动保持"实时连接"
+        // 避免网络瞬时波动导致状态频繁闪烁。
+        if (failCount >= FAIL_THRESHOLD) {
+          document.getElementById('liveDot').className = 'dot';
+          document.getElementById('connStatus').textContent = '重连中…';
+        }
         console.error('refresh error:', e);
+      } finally {
+        // 无论成功失败都释放锁，下一轮 setInterval 可正常发起。
+        refreshInFlight = false;
       }
     }
 

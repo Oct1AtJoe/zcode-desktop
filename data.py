@@ -473,7 +473,11 @@ def _volc_call(action: str, body: dict) -> dict | None:
             "Authorization": authorization,
         }
         url = f"https://{VOLC_HOST}/?{canonical_querystring}"
-        resp = requests.post(url, headers=headers, data=body_bytes, timeout=8)
+        # 超时 3s（原 8s）。火山用量是 60s 缓存的弱实时数据，长时间空闲后首次
+        # 调用常因网络栈休眠/TLS 会话过期而接近超时上限；8s 会让 status() 整体
+        # 卡住，叠加前端 1.5s 轮询导致 JS 桥调用堆积、UI 长时间显示"重连中"。
+        # 缩到 3s 宁可快速失败走缓存，也不阻塞本地 token 展示。
+        resp = requests.post(url, headers=headers, data=body_bytes, timeout=3)
         data = resp.json()
         if resp.status_code != 200:
             return None
@@ -680,9 +684,14 @@ def _read_plan_usage() -> dict:
     action = "GetCodingPlanUsage" if VOLC_PLAN_TYPE == "coding" else "GetAFPUsage"
     resp = _volc_call(action, {})
     if resp is None:
+        # 调用失败（超时/网络/签名错误）时，不要刷新缓存时间戳、也不要把空结构
+        # 写入缓存。改为复用上一次成功的缓存（如果有）：这样火山短暂不可用时，
+        # 组件继续显示上次的套餐数据而不是空白/隐藏，避免 UI 闪烁。
+        # 旧缓存超时（VOLC_CACHE_TTL 已过）时才返回带 error 的空结构。
+        cached_ts_old, cached_old = _VOLC_CACHE
+        if cached_old is not None and cached_old.get("enabled") and cached_old.get("buckets"):
+            return cached_old
         empty["error"] = "调用失败"
-        _VOLC_CACHE[0] = now_ts
-        _VOLC_CACHE[1] = empty
         return empty
 
     parsed = (_parse_coding_plan if VOLC_PLAN_TYPE == "coding" else _parse_agent_plan)(resp)
