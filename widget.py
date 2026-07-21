@@ -94,6 +94,13 @@ _set_windows_taskbar_icon()
 
 def main() -> None:
     api = Api()
+    # 启动火山用量后台刷新线程：周期性调用火山 OpenAPI 刷新 _VOLC_CACHE，
+    # 让 status() 调用路径上不再有任何网络请求。网络栈休眠时 requests.post
+    # 阻塞只会卡后台 daemon 线程，不会拖死 status()，从而根治长时间空闲后
+    # 组件卡在"重连中"的问题。线程幂等启动，daemon=True 随进程退出。
+    from data import start_volc_refresher
+    start_volc_refresher()
+
     html_path = os.path.join(HERE, "widget.html")
 
     # NOTE: We deliberately do NOT pass js_api=api here. Passing the whole Api
@@ -107,7 +114,7 @@ def main() -> None:
         url=html_path,
         width=322,
         height=840,
-        x=1860,
+        x=1260,
         y=80,
         resizable=False,
         frameless=True,

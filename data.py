@@ -649,50 +649,52 @@ def _parse_agent_plan(afp: dict) -> dict:
     }
 
 
-def _read_plan_usage() -> dict:
-    """读取火山方舟套餐的云端用量。
+def _volc_refresh_once() -> None:
+    """执行一次火山方舟套餐用量的网络调用并更新 _VOLC_CACHE。
 
-    按 VOLC_PLAN_TYPE 选择套餐类型：coding -> GetCodingPlanUsage（编程套餐，
-    仅百分比），agent -> GetAFPUsage（旧 AgentPlan，绝对额度）。两种解析结果
-    归一化成相同结构（status / buckets[quota|used|remaining|remainingPct|
-    usedPct|resetMs]），前端按统一逻辑渲染。
+    仅由后台守护线程 _volc_refresher_loop 周期性调用，绝不在 status() 同步
+    路径上执行。这样长时间空闲后 Windows 网络栈休眠导致 requests.post 阻塞
+    时，只会卡住后台线程，不会拖死 status()，本地 token / 任务列表 / 实时
+    活动仍能正常刷新。
 
-    与本地 model_usage（token 计数）完全独立，二者并存展示。云端数据刷新较慢，
-    缓存 VOLC_CACHE_TTL 秒；未配置凭证 / 调用失败时返回空结构（前端据此隐藏
-    云端区块），不影响本地 token 展示。
+    调用失败时复用上一次成功的缓存（不刷新时间戳、不写空结构），让火山短暂
+    不可用时组件继续显示上次套餐数据，避免 UI 闪烁/隐藏。
     """
-    now_ts = datetime.datetime.now().timestamp()
-    cached_ts, cached = _VOLC_CACHE
-    if cached is not None and (now_ts - cached_ts) < VOLC_CACHE_TTL:
-        return cached
-
-    empty = {
-        "enabled": bool(VOLC_AK_ID and VOLC_AK_SECRET),
-        "planType": VOLC_PLAN_TYPE,
-        "tier": VOLC_PLAN_TIER,
-        "rawStatus": "",
-        "buckets": [],
-        "error": "",
-        "updatedAt": datetime.datetime.now().isoformat(timespec="seconds"),
-    }
-
-    if not empty["enabled"]:
-        _VOLC_CACHE[0] = now_ts
+    if not (VOLC_AK_ID and VOLC_AK_SECRET):
+        # 未配凭证：写一次 enabled=False 的空结构即可（幂等）。
+        empty = {
+            "enabled": False,
+            "planType": VOLC_PLAN_TYPE,
+            "tier": VOLC_PLAN_TIER,
+            "rawStatus": "",
+            "buckets": [],
+            "error": "",
+            "updatedAt": datetime.datetime.now().isoformat(timespec="seconds"),
+        }
+        _VOLC_CACHE[0] = datetime.datetime.now().timestamp()
         _VOLC_CACHE[1] = empty
-        return empty
+        return
 
     action = "GetCodingPlanUsage" if VOLC_PLAN_TYPE == "coding" else "GetAFPUsage"
     resp = _volc_call(action, {})
     if resp is None:
-        # 调用失败（超时/网络/签名错误）时，不要刷新缓存时间戳、也不要把空结构
-        # 写入缓存。改为复用上一次成功的缓存（如果有）：这样火山短暂不可用时，
-        # 组件继续显示上次的套餐数据而不是空白/隐藏，避免 UI 闪烁。
-        # 旧缓存超时（VOLC_CACHE_TTL 已过）时才返回带 error 的空结构。
+        # 调用失败：保留旧缓存（如果有有效的），不刷新时间戳，等下一轮再试。
+        # 旧缓存也没有时，写一个带 error 的空结构，前端据此隐藏云端区块。
         cached_ts_old, cached_old = _VOLC_CACHE
         if cached_old is not None and cached_old.get("enabled") and cached_old.get("buckets"):
-            return cached_old
-        empty["error"] = "调用失败"
-        return empty
+            return  # 复用旧缓存，什么都不动
+        empty = {
+            "enabled": True,
+            "planType": VOLC_PLAN_TYPE,
+            "tier": VOLC_PLAN_TIER,
+            "rawStatus": "",
+            "buckets": [],
+            "error": "调用失败",
+            "updatedAt": datetime.datetime.now().isoformat(timespec="seconds"),
+        }
+        _VOLC_CACHE[0] = datetime.datetime.now().timestamp()
+        _VOLC_CACHE[1] = empty
+        return
 
     parsed = (_parse_coding_plan if VOLC_PLAN_TYPE == "coding" else _parse_agent_plan)(resp)
     raw_status = parsed["rawStatus"]
@@ -716,9 +718,69 @@ def _read_plan_usage() -> dict:
         "error": ("套餐未生效（%s）" % raw_status) if (VOLC_PLAN_TYPE == "coding" and raw_status and raw_status != "Running") else "",
         "updatedAt": datetime.datetime.now().isoformat(timespec="seconds"),
     }
-    _VOLC_CACHE[0] = now_ts
+    _VOLC_CACHE[0] = datetime.datetime.now().timestamp()
     _VOLC_CACHE[1] = result
-    return result
+
+
+# 后台刷新线程是否已启动的标志（避免重复启动）。
+_VOLC_REFRESHER_STARTED = False
+
+
+def _volc_refresher_loop() -> None:
+    """后台守护线程主循环：周期性刷新火山用量缓存。
+
+    首次立即执行一次（让组件启动后尽快拿到云端数据），之后每 VOLC_CACHE_TTL
+    秒刷新一次。所有网络调用都在这个线程里，status() 只读 _VOLC_CACHE，永远
+    不会被网络阻塞拖死。
+    """
+    import time
+    while True:
+        try:
+            _volc_refresh_once()
+        except Exception:
+            # 后台线程绝不能因异常退出，否则缓存永远不再刷新。
+            pass
+        time.sleep(VOLC_CACHE_TTL)
+
+
+def start_volc_refresher() -> None:
+    """启动火山用量后台刷新线程（幂等，重复调用只启动一次）。
+
+    由 widget.py 在创建 Api 后调用。线程为 daemon，随主进程退出自动结束。
+    """
+    global _VOLC_REFRESHER_STARTED
+    if _VOLC_REFRESHER_STARTED:
+        return
+    _VOLC_REFRESHER_STARTED = True
+    import threading
+    t = threading.Thread(target=_volc_refresher_loop, name="volc-refresher", daemon=True)
+    t.start()
+
+
+def _read_plan_usage() -> dict:
+    """读取火山方舟套餐的云端用量（纯读缓存，永不阻塞、永不走网络）。
+
+    实际的网络调用由后台守护线程 _volc_refresher_loop 周期性执行并写入
+    _VOLC_CACHE。本函数只负责返回缓存内容，确保 status() 调用路径上没有任何
+    网络请求——这是根治"长时间空闲后组件卡在重连中"的关键：网络栈休眠时
+    requests.post 阻塞只会卡后台线程，不影响 status() 的快速返回。
+
+    缓存未就绪（后台线程还没完成首次刷新）时返回空结构，前端据此隐藏云端
+    区块；后台线程刷新成功后下一次轮询即可见。
+    """
+    cached_ts, cached = _VOLC_CACHE
+    if cached is not None:
+        return cached
+    # 缓存未就绪：返回空结构（enabled 由是否配置凭证决定），不阻塞。
+    return {
+        "enabled": bool(VOLC_AK_ID and VOLC_AK_SECRET),
+        "planType": VOLC_PLAN_TYPE,
+        "tier": VOLC_PLAN_TIER,
+        "rawStatus": "",
+        "buckets": [],
+        "error": "",
+        "updatedAt": datetime.datetime.now().isoformat(timespec="seconds"),
+    }
 
 
 def _read_live_activity() -> dict:

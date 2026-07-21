@@ -908,6 +908,9 @@
     // setInterval 永久轮询），必须前端用 Promise.race 自保，避免火山调用卡死时
     // Promise 永久 pending、refresh 永远停在这一帧。
     const STATUS_TIMEOUT_MS = 5000;
+    // 是否已完成首次成功渲染。失败时若已渲染过，保留上次数据不动，避免界面
+    // 残留 #initStatus 的"已连接，读取数据…"或被清空。
+    let firstRenderDone = false;
 
     const fmt = (n) => {
       if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
@@ -943,8 +946,8 @@
       refreshInFlight = true;
       try {
         // 用 Promise.race 给 status() 加超时。pywebview 的 JS 桥没有原生超时，
-        // 火山调用卡住时 api.status() 返回的 Promise 会永久 pending，必须前端
-        // 自己抢超时才能让 refresh 落到 catch 分支、释放锁、继续下一轮。
+        // 后端 status() 理论上已无网络调用（火山走后台线程），但保留超时作为
+        // 双保险，避免任何意外阻塞导致 refresh 永久卡在这一帧。
         const s = await Promise.race([
           api.status(),
           new Promise((_, reject) =>
@@ -955,17 +958,20 @@
         renderPlanUsage(s.planUsage);
         renderTasks(s.recentTasks);
         renderClock(s.now);
+        firstRenderDone = true;
         failCount = 0;
         document.getElementById('liveDot').className = 'dot live';
         document.getElementById('connStatus').textContent = '实时连接';
       } catch (e) {
         failCount++;
-        // 连续 FAIL_THRESHOLD 次失败才显示"重连中"，单次抖动保持"实时连接"
+        // 连续 FAIL_THRESHOLD 次失败才显示"重连中"，单次抖动保持"实时连接"，
         // 避免网络瞬时波动导致状态频繁闪烁。
         if (failCount >= FAIL_THRESHOLD) {
           document.getElementById('liveDot').className = 'dot';
           document.getElementById('connStatus').textContent = '重连中…';
         }
+        // 失败时保留上次成功渲染的数据，不清空界面、不重新显示 #initStatus。
+        // 只有"从未成功渲染过"才让 #initStatus 继续显示加载态。
         console.error('refresh error:', e);
       } finally {
         // 无论成功失败都释放锁，下一轮 setInterval 可正常发起。
