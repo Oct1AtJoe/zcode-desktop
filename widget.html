@@ -7,6 +7,15 @@
   <title>ZCode 用量组件</title>
   <style>
     :root {
+      /* ---- 玻璃变量体系(移植自 token-monitor styles.css,匹配系统 Acrylic ARGB 0x3a232323) ---- */
+      --glass-rgb: 48, 52, 56;
+      --glass-alpha: 0.68;
+      --glass: rgba(var(--glass-rgb), var(--glass-alpha));
+      --glass-filter: blur(32px) saturate(115%);
+      --glass-strong: rgba(31, 35, 41, 0.56);
+      --glass-soft: rgba(255, 255, 255, 0.05);
+      --line: rgba(232, 238, 244, 0.138);
+      --line-strong: rgba(232, 238, 244, 0.238);
       --bg: #0f1014;
       --bg2: #16181f;
       --card: #1a1d27;
@@ -40,7 +49,7 @@
 
     body {
       font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", -apple-system, system-ui, sans-serif;
-      background: #0f1014;
+      background: transparent;
       color: var(--text);
       overflow: hidden;
       -webkit-font-smoothing: antialiased;
@@ -52,12 +61,15 @@
     .widget {
       width: 100%;
       height: 100%;
-      border-radius: 0;
-      background: linear-gradient(180deg, #1a1d27, #0f1014);
-      border: none;
+      border-radius: 12px;
+      background: var(--glass);
+      border: 1px solid var(--line);
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      box-shadow: var(--shadow);
+      -webkit-backdrop-filter: var(--glass-filter);
+      backdrop-filter: var(--glass-filter);
     }
 
     /* ---- header / drag handle ---- */
@@ -187,6 +199,16 @@
     }
 
     /* ---- collapsed (icon) state ---- */
+    /* 折叠态窗口缩到 48x48。透明窗口下窗口四角是 WebView2 方形客户区,CSS 圆角
+       裁不掉会露黑边。解法:折叠态 .widget 与 .logo 都用方形(border-radius:0),
+       让渐变图标精确填满 48x48 方形窗口,四角是图标内容而非黑边。 */
+    .widget.collapsed {
+      border-radius: 0;
+      border: none;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
     .widget.collapsed .titles,
     .widget.collapsed .clock,
     .widget.collapsed .collapse-btn,
@@ -200,6 +222,7 @@
       padding: 0;
       flex: 1;
       border-bottom: none;
+      background: none;
     }
 
     .widget.collapsed .logo {
