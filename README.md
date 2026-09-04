@@ -12,7 +12,7 @@
 - **任务列表**：当前运行任务 + 最近任务（含 token 消耗），点击卡片经 `zcode://open-project` 协议打开对应工作区
 - **实时活动**：tail 本地 JSONL 日志，解析工具调用事件流
 - **液态玻璃 UI**：深 / 浅双主题令牌，毛玻璃模糊（`blur(32px) saturate(115%)`）+ 天光描边，失焦自动折叠为小图标
-- **置顶悬浮**：`alwaysOnTop` 无边框窗口，8 方向自定义 resize，最小 48x48；折叠态强化置顶（`SetWindowPos(HWND_TOPMOST)` 压过其它置顶窗口 + 2s 定时刷新，保证始终最顶层）
+- **置顶悬浮**：`alwaysOnTop` 无边框窗口，8 方向自定义 resize，最小 48x48；折叠态强化置顶（`SetWindowPos(HWND_TOPMOST)` 压过其它置顶窗口 + 2s 定时刷新）；防最小化 native 守护线程（Win+D 显示桌面后 ≤2s 自动恢复，`SW_SHOWNOACTIVATE` 不抢焦点）
 
 ## 界面说明
 
@@ -133,6 +133,7 @@ docs/widget-preview-v3.jpg   # 界面预览图
 
 - **透明窗口系统拖拽内容消失**：WebView2 透明窗口在系统移动循环（SC_MOVE，`startDragging` / `data-tauri-drag-region`）期间暂停合成渲染 → 拖动时内容消失。解决方案：弃用系统拖拽，Rust 原生线程 `GetCursorPos + SetWindowPos` 高频移动（~500Hz，零 IPC）；`timeBeginPeriod(1)` 提升 sleep 精度（默认 15.6ms 粒度只有 ~60Hz，不跟手）
 - **失焦折叠竞态**：tauri `onFocusChanged` 事件异步派发，失焦后快速点击回窗口会先收到 false 再收到 true，立即折叠会把刚聚焦的窗口缩掉（实测"按住 header 拖动时窗口折叠"）。修复：失焦后延迟 300ms 确认，期间重新聚焦则取消；拖动期间（`__dragGuard`）忽略折叠
+- **最小化后 JS 定时器停摆无法自救**：Win+D / 显示桌面会最小化所有窗口（TOPMOST 也躲不过），窗口一旦最小化 WebView2 暂停渲染 → 前端 `setInterval` 全部冻结，靠前端调 pinTop 恢复自己是不可能的（实测卡死 iconic）。修复：防最小化放 Rust native 守护线程（`window.rs` `start_anti_min_guard`，每 2s 查 `IsIconic` → `SW_SHOWNOACTIVATE` 恢复 + 重插 topmost 链顶）
 - **tauri 无内置 set_opacity**：手写 Win32 `SetLayeredWindowAttributes`（前端当前未调用，接口完整性保留）
 - **tauri-bundler 无 portable target**：只有 msi / nsis（Tauri 2.9.3 确认），NSIS currentUser 单文件安装器为最近体验
 - **后端数据读取走 spawn_blocking**：SQLite 聚合 ~180ms/轮在 tokio 阻塞池执行，不占 UI 线程（Electron 版拖动卡顿根因在 Rust 侧不存在）

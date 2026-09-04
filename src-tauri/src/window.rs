@@ -70,3 +70,29 @@ pub fn apply_chrome(win: &WebviewWindow) {
 pub fn scale_factor(win: &WebviewWindow) -> f64 {
     win.scale_factor().unwrap_or(1.0)
 }
+
+// 防最小化守护线程（native 侧，Rust 不冻结）：Win+D/显示桌面 会最小化所有
+// 窗口（TOPMOST 也躲不过），而窗口一旦最小化 WebView2 暂停渲染 → 前端 JS 的
+// pinTop 定时器全部停摆、无法自救（实测）。故必须 Rust 侧轮询：IsIconic 则
+// SW_SHOWNOACTIVATE 恢复（不抢焦点）+ 重插 topmost 链顶。展开/折叠态都保护。
+pub fn start_anti_min_guard(app: AppHandle) {
+    use std::time::Duration;
+    use tauri::Manager;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        IsIconic, SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE,
+        SWP_NOACTIVATE, SW_SHOWNOACTIVATE,
+    };
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_secs(2));
+            let Some(win) = app.get_webview_window("main") else { return };
+            let hwnd = win.hwnd().unwrap_or_default().0;
+            unsafe {
+                if IsIconic(hwnd) != 0 {
+                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                }
+            }
+        }
+    });
+}

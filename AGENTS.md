@@ -5,9 +5,9 @@
 > ZCode 用量监控桌面组件（**Tauri 2 版为主，v3.0.0**；Electron v2.0.x legacy 保留在 `src/`，勿主动改）：无边框置顶悬浮窗 322x840，每 ~1.5s 轮询 `window.zapi.status()`（Tauri 经 `withGlobalTauri` + 前端 shim，Electron legacy 经 preload contextBridge），读取 `~/.zcode` 本地数据（tasks-index.sqlite / db.sqlite 的 model_usage / JSONL 日志）+ `~/.dsh/sessions`（zstd 压缩会话日志）+ 火山方舟 / opencode / DeepSeek / 无痕中转 OpenAPI（后台 scheduler 15s 刷新缓存），展示模型 token 用量 / 云端套餐额度 / 任务列表 / DSH 会话。
 
 ### 目录结构概览（Tauri 版为主）
-- `src-tauri/src/main.rs` -- 入口：单实例锁插件 + setup（scheduler 启动 + 建窗）+ invoke_handler 注册 8 个命令
+- `src-tauri/src/main.rs` -- 入口：单实例锁插件 + setup（scheduler 启动 + 建窗 + 防最小化守护）+ invoke_handler 注册 9 个命令
 - `src-tauri/src/window.rs` -- 窗口层：322x840@(1260,80)、frameless/transparent/alwaysOnTop/resizable(false)/shadow(false)；tauri 内置 Acrylic（`WindowEffect::Acrylic` + ACCENT_TINT）+ 手写 DWM 圆角/去边框（windows-sys）；`scale_factor()` CSS 像素换算
-- `src-tauri/src/commands.rs` -- IPC：`status`（spawn_blocking）/ `win_quit` / `win_get_pos` / `win_move` / `win_drag_start` / `win_resize` / `win_set_opacity` / `open_task`
+- `src-tauri/src/commands.rs` -- IPC：`status`（spawn_blocking）/ `win_quit` / `win_get_pos` / `win_move` / `win_drag_start` / `win_resize` / `win_set_opacity` / `win_pin_top`（折叠态强化置顶）/ `open_task`
 - `src-tauri/src/data/` -- Rust 数据层：`mod.rs`（`status()` 聚合 + 15s TTL 缓存 + dump_status 冒烟测试）、`sqlite.rs`（rusqlite bundled 只读 + JSONL tail）、`volc.rs`（SigV4 + 套餐 + .volc.env 加载）、`deepseek.rs` / `opencode.rs` / `wuhen.rs` / `dsh.rs`（zstd 逐帧解压）、`net.rs`（共用 HTTP 客户端）、`scheduler.rs`（4 个独立 tokio 循环，15s TTL）
 - `src-tauri/tauri.conf.json` -- `withGlobalTauri`、`frontendDist: ../src/renderer`、NSIS currentUser 打包
 - `src-tauri/capabilities/default.json` -- IPC 权限（core:default + start-dragging）
@@ -18,12 +18,12 @@
 ### 关键文件入口
 - 主进程入口: `src-tauri/src/main.rs` -- `npm run tauri:dev` / `启动组件.bat` / 打包 exe 均走这里
 - 数据聚合: `src-tauri/src/data/mod.rs` 的 `status()` -- 所有前端数据源，**零网络只读缓存**（网络调用全在 scheduler 后台）
-- 窗口/装饰: `src-tauri/src/window.rs` 的 `create_main()` / `apply_chrome()`
+- 窗口/装饰: `src-tauri/src/window.rs` 的 `create_main()` / `apply_chrome()` / `start_anti_min_guard()`（防最小化守护）
 - 前端轮询: `src/renderer/index.html` 的 `startPolling()`（每 1500ms 调 `zapi.status()`）
 - 版本号: `src-tauri/Cargo.toml` + `tauri.conf.json` **两处同步**
 
 ### 功能模块
-- **窗口/桥接层** (`main.rs`+`window.rs`+`commands.rs`): frameless + `alwaysOnTop` + `transparent`；tauri 内置 Acrylic（WCA_ACCENT_POLICY，与 Electron koffi recipe 同源），页面透明像素显示窗口背景模糊；DWM 圆角（DWMWCP_ROUND）+ 去 1px 边框（DWMWA_BORDER_COLOR=NONE）；前端自实现 8 方向 resize（`win_resize` 后重设 `apply_chrome`）；失焦折叠由前端 `onFocusChanged` 监听实现
+- **窗口/桥接层** (`main.rs`+`window.rs`+`commands.rs`): frameless + `alwaysOnTop` + `transparent`；tauri 内置 Acrylic（WCA_ACCENT_POLICY，与 Electron koffi recipe 同源），页面透明像素显示窗口背景模糊；DWM 圆角（DWMWCP_ROUND）+ 去 1px 边框（DWMWA_BORDER_COLOR=NONE）；前端自实现 8 方向 resize（`win_resize` 后重设 `apply_chrome`）；失焦折叠由前端 `onFocusChanged` 监听实现；折叠态强化置顶 `win_pin_top`（SetWindowPos HWND_TOPMOST 压过其它置顶窗口 + 前端 2s 定时刷新，展开态停止）；防最小化由 native 守护线程 `start_anti_min_guard`（每 2s 查 IsIconic → SW_SHOWNOACTIVATE 恢复，Win+D 后 ≤2s 弹回）
 - **拖拽**（重要，分两态）: 展开态用**原生线程高频拖拽**（`win_drag_start`：GetCursorPos + SetWindowPos ~500Hz，零 IPC，`timeBeginPeriod(1)` 提 sleep 精度；**不用系统 startDragging**——透明窗口在 SC_MOVE 期间 WebView2 暂停合成、内容消失）；折叠态用 JS `pointerdown + setPointerCapture + win_move()`（窗口 48x48 太小，指针捕获保证移出窗口仍收事件）。logo 点击展开由 JS pointerup 的移动阈值区分点击/拖动
 - **数据采集** (`data/`): `sqlite.rs` 的 `read_tasks`/`read_task_tokens`/`read_usage`/`read_live_activity`（读 `~/.zcode/v2/tasks-index.sqlite` + `~/.zcode/cli/db/db.sqlite` 的 model_usage 表 + tail JSONL 日志）；`volc.rs` SigV4（open.volcengineapi.com / SERVICE=ark / REGION=cn-beijing / VERSION=2024-01-01）；`wuhen.rs`（api.wuhen-ai.com/v1/usage）；`dsh.rs`（`~/.dsh/sessions` zstd 逐帧解压，精确 usage billed 口径，15s 缓存）
 - **前端渲染** (`index.html`): ZCode / DSH 双视图胶囊切换；供应商单按钮+下拉面板（火山/opencode/DeepSeek/无痕）；DSH 会话卡列表（超高内部滚动）；SVG 渐变数字（`getComputedTextLength()` 测宽，display:none 容器估算、切 tab 后 remeasure）；玻璃通透度滑块只改 CSS 变量 `--glass-alpha`；任务卡点击 `openTask` 走 `zcode://open-project?directory=` 协议（cmd start）
@@ -55,6 +55,7 @@
 ### 历史决策与已知坑（Tauri 版）
 - **透明窗口系统拖拽内容消失**（v3.0.0 最重要的坑）: WebView2 透明窗口在系统移动循环（SC_MOVE，`startDragging` / `data-tauri-drag-region`）期间暂停合成渲染 → 拖动时内容消失。修复：弃用系统拖拽，Rust 原生线程 `GetCursorPos + SetWindowPos` 高频移动（~500Hz，零 IPC）；`timeBeginPeriod(1)` 提升 sleep 精度（默认 15.6ms 粒度只有 ~60Hz，不跟手）；HWND 裸指针不 Send，isize 传进线程再转回；线程自检测左键松开退出 [来源: commands.rs 注释]
 - **失焦折叠竞态**（v3.0.0）: tauri `onFocusChanged` 事件异步派发，失焦后快速点击回窗口会先收到 false 再收到 true，立即折叠会把刚聚焦的窗口缩掉（实测"按住 header 拖动时窗口折叠"）。修复：失焦后延迟 300ms 确认，期间重新聚焦则取消；拖动期间（`__dragGuard`）忽略折叠 [来源: README 已知坑]
+- **最小化后 JS 定时器停摆无法自救**（置顶强化时发现）: Win+D/显示桌面最小化所有窗口（TOPMOST 也躲不过），窗口最小化后 WebView2 暂停渲染 → 前端 setInterval（含 pinTop 定时器）全部冻结，靠前端恢复自己不可能（实测卡死 iconic）。修复：防最小化放 Rust native 守护线程 `window.rs::start_anti_min_guard`，每 2s 查 IsIconic → SW_SHOWNOACTIVATE 恢复（不抢焦点）+ 重插 topmost 链顶。另：验证命令是否编译进 exe 别用二进制明文搜索——LTO 把命令名比较内联成 x86 立即数，完整命令名不连续出现（假阴性）；可靠手段是临时 `.additional_browser_args("--remote-debugging-port=9333")` 起 WebView2 CDP，实调 `invoke()` 验证 [来源: commands.rs/window.rs 注释]
 - **tauri 无内置 set_opacity**: 手写 Win32 `SetLayeredWindowAttributes`（WS_EX_LAYERED 与 DWM 圆角可能不兼容，已知坑）；前端当前未调用，仅为接口完整性保留（对齐 preload window.zapi.setOpacity）
 - **tauri-bundler 无 portable target**（Tauri 2.9.3 确认）: 只有 msi/nsis；便携方案用裸 exe（依赖系统 WebView2，实测拷走即用）
 - **后端数据读取走 spawn_blocking**: SQLite 聚合 ~180ms/轮在 tokio 阻塞池执行，不占 UI 线程（Electron 版拖动卡顿根因在 Rust 侧不存在）

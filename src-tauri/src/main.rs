@@ -23,6 +23,7 @@ fn main() {
             // 后台刷新调度（火山/DeepSeek/opencode/wuhen/scnet，60s 周期，首次立即执行）
             data::scheduler::start_all(app.handle().clone());
             window::create_main(app.handle())?;
+            window::start_anti_min_guard(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

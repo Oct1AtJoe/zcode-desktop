@@ -101,6 +101,8 @@ pub fn win_pin_top(window: WebviewWindow) {
     // 压过同链其它置顶窗口（tauri always_on_top 只保证在普通窗口之上，其它
     // 置顶窗口激活后仍会盖住本窗）。前端折叠态每 2s 调一次 → 始终最顶层。
     // 全屏独占窗口（游戏/全屏视频）绕过 DWM 合成，压不过——物理限制。
+    // 防最小化不在此处：窗口最小化后 WebView2 暂停渲染、本命令无人再调，
+    // 由 window.rs 的 native 守护线程负责恢复（Rust 侧不冻结）。
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SetWindowPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE,
     };
