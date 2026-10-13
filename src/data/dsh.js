@@ -155,6 +155,23 @@ function statLog(logPath, sid) {
   return s;
 }
 
+// 找当前代数会话日志：优先 session.v<N>.jsonl[.zstd]（N 最大），回退 session.jsonl[.zstd]
+// （DSH 0.1.5+ 格式升 v3 后日志名带版本后缀，届时 vN 文件才是最新活数据）
+function findLog(dir) {
+  let best = null;
+  let legacy = null;
+  for (const name of fs.readdirSync(dir)) {
+    const m = /^session\.v(\d+)\.jsonl(?:\.zstd)?$/.exec(name);
+    if (m) {
+      const v = Number(m[1]);
+      if (!best || v > best[0]) best = [v, path.join(dir, name)];
+    } else if (name === 'session.jsonl' || name === 'session.jsonl.zstd') {
+      legacy = path.join(dir, name);
+    }
+  }
+  return best ? best[1] : legacy;
+}
+
 // 聚合所有 workspace 的会话统计
 function scan() {
   const workspaces = [];
@@ -178,8 +195,9 @@ function scan() {
       tokens: { ...ZERO }, tokensToday: { ...ZERO }, latestTs: 0,
     };
     for (const sid of sids) {
-      const logPath = path.join(wsPath, sid, 'session.jsonl.zstd');
-      if (!fs.existsSync(logPath)) continue;
+      let logPath;
+      try { logPath = findLog(path.join(wsPath, sid)); } catch (e) { continue; }
+      if (!logPath) continue;
       const s = statLog(logPath, sid);
       if (!s) continue;
       const wsName = s.cwd ? path.basename(s.cwd) : fallbackName;

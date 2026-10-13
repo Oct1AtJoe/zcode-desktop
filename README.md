@@ -78,7 +78,7 @@ SCNET_AUTH_COOKIE=jsessionid=xxx; userName=xxx; Token=xxx
 | 数据 | 来源 |
 |------|------|
 | 任务列表 / token 用量 | `~/.zcode/v2/tasks-index.sqlite` + `~/.zcode/cli/db/db.sqlite` 的 `model_usage` 表 |
-| DSH 会话用量 | `~/.dsh/sessions`（zstd 压缩日志逐帧解压，精确 usage，billed 输入含缓存，15s 缓存） |
+| DSH 会话用量 | `~/.dsh/sessions`（zstd 压缩日志逐帧解压，精确 usage，billed 输入含缓存，15s 缓存；日志文件名随格式版本变化 `session.v<N>.jsonl.zstd`，自动选最大版本号，兼容 DSH 0.1.5+ v3） |
 | 实时活动 | `~/.zcode/cli/log/zcode-<date>.jsonl`（tail 400 行） |
 | 火山套餐额度 | `open.volcengineapi.com` Ark OpenAPI（SigV4，15s 后台刷新） |
 | opencode 额度 | dashboard 页面解析（SolidJS SSR 水合数据） |
@@ -141,6 +141,8 @@ docs/widget-preview-v3.jpg   # 界面预览图
 ## 版本历史
 
 - `v3.0.1` DSH 用量总览改今日口径：今日输入大字（本地自然日窗口）+ 累计小字（悬停看完整明细）+ 今日分模型悬浮 + 今日输入/输出/推理/缓存四格；删会话/turn/step/工具调用摘要行与"X 会话"徽标（Rust dsh.rs 与 Electron legacy dsh.js 同步实现）
+- `v3.0.1` 补丁：修复 DSH 0.1.5-rc.2 会话日志改名 `session.v3.jsonl.zstd` 导致的今日用量严重偏小/整批漏算（`dsh.rs::find_log` / legacy `dsh.js::findLog` 按版本号选最大 `session.v<N>` 文件，未来 v4+ 自动兼容；不写死 `session.jsonl.zstd`）
+- `v3.0.1` 补丁：修复 DSH 最近会话卡项目名/模型名过长导致时间戳裁切与卡片溢出（CSS 弹性自适应截断，保证时间戳始终完整贴右，悬停展示完整名称）
 - `v3.0.0` Tauri 2 重构：exe 78MB→~8MB，内存减半；前端零改动复用（zapi shim 双端共存）；数据层 Rust 直译（对拍验证一致）；原生线程高频拖拽 + 失焦折叠竞态修复（透明窗口 SC_MOVE 渲染暂停 / onFocusChanged 异步竞态两大坑）；NSIS 单文件安装器
 - `v2.0.6` DSH 视图升级：精确 token（对齐 GUI billed 口径：输入含缓存读取/写入，usage chunk + message 双源去重）+ 最近会话卡列表（真实 cwd 最后一层文件夹名）+ 分模型用量悬浮 + 会话列表内部滚动 + 顶栏去时钟/标题精简 + bat 启动改为本地 electron.exe（不依赖 npx）
 - `v2.0.6` 补丁：修复两处无声退出——① koffi 偶发崩溃（`0xc0000409` 栈破坏 fail-fast）：删启动 DWM 探针 + koffi 升级 3.1.5；② dsh 会话 zstd 解压 OOM（Electron 35 的 `zstdDecompressSync` 输出 Buffer 进老生代后 major GC 不触发，海量会话帧累积数 GB 提交内存导致进程无声退出）：解压循环每 200 帧制造堆压力强制 GC（实测峰值 9.4GB→1.25GB）

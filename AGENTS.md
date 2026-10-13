@@ -25,7 +25,7 @@
 ### 功能模块
 - **窗口/桥接层** (`main.rs`+`window.rs`+`commands.rs`): frameless + `alwaysOnTop` + `transparent`；tauri 内置 Acrylic（WCA_ACCENT_POLICY，与 Electron koffi recipe 同源），页面透明像素显示窗口背景模糊；DWM 圆角（DWMWCP_ROUND）+ 去 1px 边框（DWMWA_BORDER_COLOR=NONE）；前端自实现 8 方向 resize（`win_resize` 后重设 `apply_chrome`）；失焦折叠由前端 `onFocusChanged` 监听实现；折叠态强化置顶 `win_pin_top`（SetWindowPos HWND_TOPMOST 压过其它置顶窗口 + 前端 2s 定时刷新，展开态停止）；防最小化由 native 守护线程 `start_anti_min_guard`（每 2s 查 IsIconic → SW_SHOWNOACTIVATE 恢复，Win+D 后 ≤2s 弹回）
 - **拖拽**（重要，分两态）: 展开态用**原生线程高频拖拽**（`win_drag_start`：GetCursorPos + SetWindowPos ~500Hz，零 IPC，`timeBeginPeriod(1)` 提 sleep 精度；**不用系统 startDragging**——透明窗口在 SC_MOVE 期间 WebView2 暂停合成、内容消失）；折叠态用 JS `pointerdown + setPointerCapture + win_move()`（窗口 48x48 太小，指针捕获保证移出窗口仍收事件）。logo 点击展开由 JS pointerup 的移动阈值区分点击/拖动
-- **数据采集** (`data/`): `sqlite.rs` 的 `read_tasks`/`read_task_tokens`/`read_usage`/`read_live_activity`（读 `~/.zcode/v2/tasks-index.sqlite` + `~/.zcode/cli/db/db.sqlite` 的 model_usage 表 + tail JSONL 日志）；`volc.rs` SigV4（open.volcengineapi.com / SERVICE=ark / REGION=cn-beijing / VERSION=2024-01-01）；`wuhen.rs`（api.wuhen-ai.com/v1/usage）；`dsh.rs`（`~/.dsh/sessions` zstd 逐帧解压，精确 usage billed 口径，15s 缓存）
+- **数据采集** (`data/`): `sqlite.rs` 的 `read_tasks`/`read_task_tokens`/`read_usage`/`read_live_activity`（读 `~/.zcode/v2/tasks-index.sqlite` + `~/.zcode/cli/db/db.sqlite` 的 model_usage 表 + tail JSONL 日志）；`volc.rs` SigV4（open.volcengineapi.com / SERVICE=ark / REGION=cn-beijing / VERSION=2024-01-01）；`wuhen.rs`（api.wuhen-ai.com/v1/usage）；`dsh.rs`（`~/.dsh/sessions` zstd 逐帧解压，精确 usage billed 口径，15s 缓存；`find_log` 优先读 `session.v<N>.jsonl.zstd` 中 N 最大者，回退 `session.jsonl[.zstd]`，见「历史决策与已知坑」DSH 0.1.5-rc.2 条目）
 - **前端渲染** (`index.html`): ZCode / DSH 双视图胶囊切换；供应商单按钮+下拉面板（火山/opencode/DeepSeek/无痕）；DSH 会话卡列表（超高内部滚动）；SVG 渐变数字（`getComputedTextLength()` 测宽，display:none 容器估算、切 tab 后 remeasure）；玻璃通透度滑块只改 CSS 变量 `--glass-alpha`；任务卡点击 `openTask` 走 `zcode://open-project?directory=` 协议（cmd start）
 - **性能设计**: `status()` 零网络（15s 聚合缓存）；SQLite 聚合走 `spawn_blocking`（tokio 阻塞池，~180ms/轮不占 UI 线程）；渲染端 `refreshSig` 稳定签名，数据未变跳过整块 DOM 重建；时钟独立 1s tick
 
@@ -68,6 +68,7 @@
 - **滑块填充归一化**（沿用 2.0.2）: range min=30 时 `--op-fill` 按 `(v-min)/(max-min)` 计算
 - **Electron legacy 坑**（仅 legacy 相关，v2.0.x）: koffi 偶发崩溃（0xc0000409，删 DWM 探针 + koffi 3.1.5 修复）；dsh zstd 解压 OOM（Electron 35 的 `zstdDecompressSync` 输出进老生代后 major GC 不触发，每 200 帧强制 GC 修复）；日志整文件读阻塞主进程（尾部 chunk 读）；聚合 15s ttlMemo 缓存
 - **遗留临时文件**: `.tmp_decompress.cjs`（~/.dsh/sessions zstd 日志解压调试脚本）、`.tmp_shot.png`（截图），用完可删，勿提交
+- **DSH 0.1.5-rc.2 会话日志改名 session.vN.jsonl.zstd**（v3.0.1，09-14）: DSH 格式升 v3 后，会话日志文件从 `session.jsonl.zstd` 变为 `session.v3.jsonl.zstd`（命名规则见 dsh-session-format/src/filename.ts：v0=session.jsonl，vN=session.vN.jsonl[.zstd]）。旧 `session.jsonl.zstd` 只是迁移前快照/静态数据，读它会导致今日用量严重偏小、纯 v3 新建会话整批漏统计。修复：`dsh.rs::find_log` / legacy `dsh.js::findLog` 按版本号选最大 `session.v<N>` 文件，回退 `session.jsonl[.zstd]`（未来 v4+ 自动兼容）。改数据层日志发现逻辑时勿再写死 `session.jsonl.zstd` [来源: src-tauri/src/data/dsh.rs 注释]
 - **测试体系薄弱**: 无自动化测试/CI，仅有 cargo test dump_status 冒烟 + 临时 node 脚本 [待补充]
 
 ---

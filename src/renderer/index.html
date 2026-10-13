@@ -762,15 +762,25 @@
       padding: 1px 6px;
       border-radius: 5px;
       border: 1px solid var(--border);
-      flex-shrink: 0;
+      flex: 0 1 auto;
+      min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      max-width: 130px;
+      max-width: 110px;
     }
 
-    /* 会话卡右上时间：不换行、不被挤压（mode-tag 与 ws-tag 都 flex-shrink:0，
-       空间不足时省略 ws-tag 而不是把时间挤到第二行） */
+    .dsh-model-tag {
+      font-size: 10.5px;
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 115px;
+    }
+
+    /* 会话卡右上时间：优先保全空间，永不被挤压截断 */
     .dsh-time {
       flex-shrink: 0;
       white-space: nowrap;
@@ -1197,6 +1207,7 @@
       align-items: center;
       gap: 6px;
       margin-bottom: 5px;
+      min-width: 0;
     }
 
     .status-pill {
@@ -2263,7 +2274,7 @@
     <div class="task-card" style="margin-bottom:7px">
       <div class="task-top">
         <span class="dsh-ws-tag" title="${escapeHtml(ws)}">${escapeHtml(ws)}</span>
-        ${s.model ? `<span class="mode-tag" title="${escapeHtml(s.model)}">${escapeHtml(s.model.split('/').pop())}</span>` : ''}
+        ${s.model ? `<span class="mode-tag dsh-model-tag" title="${escapeHtml(s.model)}">${escapeHtml(s.model.split('/').pop())}</span>` : ''}
         <span class="m dsh-time" style="margin-left:auto;font-size:9.5px;color:var(--text3)">${ago}</span>
       </div>
       <div class="task-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</div>

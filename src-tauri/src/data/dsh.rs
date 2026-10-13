@@ -75,6 +75,30 @@ fn tokens_from_usage(u: &Value) -> Option<Tokens> {
 }
 
 // 统计单个会话：精确 token + 标题/模型/工具/时间
+// 找当前代数会话日志：优先 session.v<N>.jsonl[.zstd]（N 最大，未来格式升级 v4+ 自动兼容），
+// 回退 session.jsonl[.zstd]。DSH 0.1.5+ 格式升 v3 后日志名带版本后缀
+// （对齐 dsh-session-format/src/filename.ts：v0=session.jsonl，vN=session.vN.jsonl）。
+fn find_log(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut best: Option<(u32, std::path::PathBuf)> = None;
+    let mut legacy: Option<std::path::PathBuf> = None;
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if let Some(rest) = name.strip_prefix("session.v") {
+            let rest = rest.strip_suffix(".zstd").unwrap_or(rest);
+            if let Some(v) = rest.strip_suffix(".jsonl") {
+                if let Ok(v) = v.parse::<u32>() {
+                    if best.as_ref().map_or(true, |(bv, _)| v > *bv) {
+                        best = Some((v, entry.path()));
+                    }
+                }
+            }
+        } else if name == "session.jsonl" || name == "session.jsonl.zstd" {
+            legacy = Some(entry.path());
+        }
+    }
+    best.map(|(_, p)| p).or(legacy)
+}
+
 fn stat_log(log_path: &std::path::Path, sid: &str) -> Option<Value> {
     let buf = std::fs::read(log_path).ok()?;
     let text = if log_path.to_string_lossy().ends_with(".zstd") {
@@ -287,10 +311,8 @@ fn scan() -> Value {
 
         let sids = std::fs::read_dir(&ws_path).map(|it| it.filter_map(|e| e.ok()).collect::<Vec<_>>()).unwrap_or_default();
         for sid_entry in sids {
-            let log_path = sid_entry.path().join("session.jsonl.zstd");
-            if !log_path.exists() {
-                continue;
-            }
+            // 0.1.5-rc.2 起会话日志写 session.v3.jsonl.zstd，旧 session.jsonl.zstd 只是迁移前快照
+            let Some(log_path) = find_log(&sid_entry.path()) else { continue };
             let sid = sid_entry.file_name().to_string_lossy().to_string();
             let Some(s) = stat_log(&log_path, &sid) else { continue };
             // workspace 名用首个会话真实 cwd basename 覆盖（目录名是有损编码）
