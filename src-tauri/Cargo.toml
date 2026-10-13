@@ -1,6 +1,6 @@
 [package]
 name = "zcode-usage-widget"
-version = "3.0.1"
+version = "3.0.2"
 description = "ZCode 用量监控桌面组件（Tauri 版，真磨砂 Acrylic）"
 edition = "2021"
 
